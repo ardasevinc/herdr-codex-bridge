@@ -246,7 +246,7 @@ func (r Runtime) runWatch(ctx context.Context, args []string, client *herdr.Clie
 	keyPath := filepath.Join(envValue(r.Environ, "HERDR_PLUGIN_CONFIG_DIR"), "bridge.key")
 	startedAt := r.Now()
 	eventName := envValue(r.Environ, "HERDR_PLUGIN_EVENT")
-	timeout := 5 * time.Second
+	timeout := 3 * time.Second
 	if eventName == "pane.agent_detected" {
 		timeout = 10 * time.Minute
 		eventJSON := envValue(r.Environ, "HERDR_PLUGIN_EVENT_JSON")
@@ -257,6 +257,17 @@ func (r Runtime) runWatch(ctx context.Context, args []string, client *herdr.Clie
 			} `json:"data"`
 		}
 		if eventJSON == "" || json.Unmarshal([]byte(eventJSON), &event) != nil || event.Data.Agent != "codex" || event.Data.Released {
+			return nil
+		}
+	} else if eventName == "pane.agent_status_changed" {
+		eventJSON := envValue(r.Environ, "HERDR_PLUGIN_EVENT_JSON")
+		var event struct {
+			Data struct {
+				Agent       string `json:"agent"`
+				AgentStatus string `json:"agent_status"`
+			} `json:"data"`
+		}
+		if eventJSON == "" || json.Unmarshal([]byte(eventJSON), &event) != nil || event.Data.AgentStatus != "working" || (event.Data.Agent != "" && event.Data.Agent != "codex") {
 			return nil
 		}
 	}

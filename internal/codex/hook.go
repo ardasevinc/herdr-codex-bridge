@@ -46,7 +46,7 @@ func RunHook(ctx context.Context, action string, in io.Reader, out io.Writer, cl
 	case "session-start":
 		return sessionStart(ctx, input, out, client, keyPath, now)
 	case "user-prompt-submit":
-		return userPromptSubmit(ctx, input, out, client)
+		return userPromptSubmit(ctx, input, out, client, keyPath, now)
 	default:
 		return fmt.Errorf("unknown hook action %q", action)
 	}
@@ -91,7 +91,7 @@ func sessionStart(ctx context.Context, input HookInput, out io.Writer, client *h
 	})
 }
 
-func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, client *herdr.Client) error {
+func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, client *herdr.Client, keyPath string, now time.Time) error {
 	deadline := time.Now().Add(750 * time.Millisecond)
 	for {
 		association, err := bridge.Resolve(ctx, client, input.SessionID)
@@ -102,10 +102,32 @@ func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, clien
 			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
 		}
 		if time.Now().After(deadline) {
-			return writeContext(out, "UserPromptSubmit", pendingContext(input.SessionID))
+			return writePendingMarker(out, "UserPromptSubmit", input.SessionID, "prompt", pendingContext(input.SessionID), keyPath, now)
 		}
 		time.Sleep(75 * time.Millisecond)
 	}
+}
+
+func writePendingMarker(out io.Writer, event, sessionID, source, context, keyPath string, now time.Time) error {
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("read bridge key: %w", err)
+	}
+	marker, err := protocol.New(sessionID, source, now)
+	if err != nil {
+		return err
+	}
+	line, err := marker.Sign(key)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(hookOutput{
+		SystemMessage:  line,
+		SuppressOutput: true,
+		HookSpecificOutput: hookSpecificOutput{
+			HookEventName: event, AdditionalContext: context,
+		},
+	})
 }
 
 func writeContext(out io.Writer, event, additionalContext string) error {
