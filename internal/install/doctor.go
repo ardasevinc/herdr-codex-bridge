@@ -50,6 +50,9 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 		}
 		report.Checks = append(report.Checks, check)
 	}
+	warn := func(name, message string) {
+		report.Checks = append(report.Checks, Check{Name: name, Status: "warning", Message: message})
+	}
 	_, err = exec.LookPath("herdr")
 	add("herdr_binary", err, "herdr is available on PATH")
 	add("herdr_version", minimumCommandVersion("herdr", "0.8.2"), "Herdr is compatible")
@@ -82,6 +85,9 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 			hookErr = errors.New("bridge hook commands are missing or drifted")
 		}
 		add("codex_hooks", hookErr, paths.Hooks)
+		if hookErr == nil {
+			warn("codex_hook_trust", "confirm the bridge hooks are trusted in Codex /hooks; Codex exposes no stable noninteractive trust query")
+		}
 	}
 	plugins, pluginsErr := client.Plugins(ctx)
 	if pluginsErr != nil {

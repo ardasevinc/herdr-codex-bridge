@@ -55,6 +55,8 @@ Codex integration if setup found it installed.
 - There is no telemetry and no runtime network access. Network is used only for
   installation and updates.
 - Codex hook trust is not bypassed. Codex may ask you to approve changed hooks.
+  `herdr-self doctor` reminds you to confirm trust in `/hooks`, because Codex
+  does not expose a stable noninteractive trust query.
 
 `herdr-self --skill` prints the bridge overlay followed by Herdr's live upstream
 skill. `herdr-self --help` clearly delimits bridge help from upstream Herdr help.

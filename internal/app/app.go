@@ -107,6 +107,11 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 	case "setup", "teardown":
 		return r.runInstall(args, socketPath)
 	case "doctor":
+		for _, arg := range args[1:] {
+			if arg != "--json" {
+				return fmt.Errorf("unknown doctor option %q", arg)
+			}
+		}
 		jsonOutput := contains(args[1:], "--json")
 		return install.Doctor(ctx, jsonOutput, socketPath, envValue(r.Environ, "CODEX_THREAD_ID"), outputFile(r.Stdout))
 	case "_hook":
