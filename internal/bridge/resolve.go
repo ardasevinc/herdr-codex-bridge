@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
 )
@@ -12,6 +13,20 @@ var (
 	ErrUnmapped  = errors.New("Codex thread is not mapped to a live Herdr pane")
 	ErrAmbiguous = errors.New("Codex thread maps to more than one live Herdr pane")
 )
+
+type AmbiguousError struct {
+	Matches []Association
+}
+
+func (e *AmbiguousError) Error() string {
+	panes := make([]string, 0, len(e.Matches))
+	for _, match := range e.Matches {
+		panes = append(panes, match.PaneID)
+	}
+	return fmt.Sprintf("%v: %s", ErrAmbiguous, strings.Join(panes, ", "))
+}
+
+func (e *AmbiguousError) Unwrap() error { return ErrAmbiguous }
 
 type Association struct {
 	ThreadID    string `json:"thread_id"`
@@ -42,6 +57,6 @@ func Resolve(ctx context.Context, client *herdr.Client, threadID string) (Associ
 	case 1:
 		return matches[0], nil
 	default:
-		return Association{}, fmt.Errorf("%w: %d matches", ErrAmbiguous, len(matches))
+		return Association{}, &AmbiguousError{Matches: matches}
 	}
 }

@@ -81,7 +81,7 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "--version", "version":
-		fmt.Fprintf(r.Stdout, "herdr-self %s (%s, %s)\n", version.Version, version.Commit, version.Date)
+		fmt.Fprintf(r.Stdout, "herdr-self %s (%s, %s)\n", version.Effective(), version.Commit, version.Date)
 		return nil
 	case "--bridge-help":
 		fmt.Fprint(r.Stdout, bridgeHelp)
@@ -191,7 +191,12 @@ func (r Runtime) runInstall(args []string, socketPath string) error {
 	if err != nil {
 		return err
 	}
-	opts := install.Options{Apply: contains(args[2:], "--apply"), Force: contains(args[2:], "--force"), BinaryPath: binary, SocketPath: socketPath, Version: version.Version, Out: outputFile(r.Stdout)}
+	for _, arg := range args[2:] {
+		if arg != "--apply" && arg != "--force" {
+			return fmt.Errorf("unknown %s option %q", args[0], arg)
+		}
+	}
+	opts := install.Options{Apply: contains(args[2:], "--apply"), Force: contains(args[2:], "--force"), BinaryPath: binary, SocketPath: socketPath, Version: version.Effective(), Out: outputFile(r.Stdout)}
 	if args[0] == "setup" {
 		return install.SetupCodex(opts)
 	}
