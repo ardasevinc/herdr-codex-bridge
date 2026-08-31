@@ -14,6 +14,13 @@ import (
 	"github.com/ardasevinc/herdr-codex-bridge/internal/protocol"
 )
 
+// Herdr permits an existing Codex pane's session identity to be replaced only
+// by recognized SessionStart sources. Prompt recovery exists for the in-process
+// thread replacement caused by /clear, so it must retain that semantic rather
+// than inventing a bridge-specific source that Herdr would acknowledge but
+// ignore.
+const recoverySessionStartSource = "clear"
+
 type HookInput struct {
 	SessionID     string `json:"session_id"`
 	HookEventName string `json:"hook_event_name"`
@@ -102,7 +109,7 @@ func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, clien
 			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
 		}
 		if time.Now().After(deadline) {
-			return writePendingMarker(out, "UserPromptSubmit", input.SessionID, "prompt", pendingContext(input.SessionID), keyPath, now)
+			return writePendingMarker(out, "UserPromptSubmit", input.SessionID, recoverySessionStartSource, pendingContext(input.SessionID), keyPath, now)
 		}
 		time.Sleep(75 * time.Millisecond)
 	}

@@ -84,7 +84,7 @@ func TestUserPromptReissuesFreshMarkerWhenThreadIsUnmapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if marker.SessionID != "new-thread" || marker.Source != "prompt" || !got.SuppressOutput {
+	if marker.SessionID != "new-thread" || marker.Source != "clear" || !got.SuppressOutput {
 		t.Fatalf("unexpected recovery output: marker=%#v output=%#v", marker, got)
 	}
 }
