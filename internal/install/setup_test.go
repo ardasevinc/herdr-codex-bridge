@@ -118,15 +118,20 @@ func TestSetupRollsBackPluginWhenOfficialHookRemovalFails(t *testing.T) {
 	}
 	logPath := filepath.Join(root, "commands.log")
 	pluginState := filepath.Join(root, "plugin-installed")
+	officialState := filepath.Join(root, "official-installed")
+	if err := os.WriteFile(officialState, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	herdrScript := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
 		"case \"$*\" in\n" +
 		"  '--version') echo 'herdr 0.8.2' ;;\n" +
-		"  'integration status') echo 'codex: current (v8)' ;;\n" +
+		"  'integration status') test -f " + shellQuote(officialState) + " && echo 'codex: current (v8)' ;;\n" +
+		"  'integration install codex') : > " + shellQuote(officialState) + " ;;\n" +
 		"  'plugin list --json') if test -f " + shellQuote(pluginState) + "; then echo '{\"id\":\"test\",\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-codex-bridge\",\"enabled\":true,\"source\":{\"kind\":\"github\",\"owner\":\"ardasevinc\",\"repo\":\"herdr-codex-bridge\",\"resolved_commit\":\"abc\"}}]}}'; else echo '{\"id\":\"test\",\"result\":{\"plugins\":[]}}'; fi ;;\n" +
 		"  'plugin install '* ) : > " + shellQuote(pluginState) + " ;;\n" +
 		"  'plugin uninstall herdr-codex-bridge') rm -f " + shellQuote(pluginState) + " ;;\n" +
-		"  'integration uninstall codex') exit 7 ;;\n" +
+		"  'integration uninstall codex') rm -f " + shellQuote(officialState) + "; exit 7 ;;\n" +
 		"esac\n"
 	writeExecutable(t, filepath.Join(binDir, "herdr"), herdrScript)
 	writeExecutable(t, filepath.Join(binDir, "codex"), "#!/bin/sh\necho 'codex-cli 0.149.0'\n")
@@ -148,9 +153,15 @@ func TestSetupRollsBackPluginWhenOfficialHookRemovalFails(t *testing.T) {
 	if _, err := os.Stat(paths.State); !os.IsNotExist(err) {
 		t.Fatalf("state survived rollback: %v", err)
 	}
+	if _, err := os.Stat(officialState); err != nil {
+		t.Fatalf("official integration state was not restored: %v", err)
+	}
 	commands, _ := os.ReadFile(logPath)
 	if !strings.Contains(string(commands), "plugin uninstall herdr-codex-bridge") {
 		t.Fatalf("plugin rollback missing: %s", commands)
+	}
+	if !strings.Contains(string(commands), "integration install codex") {
+		t.Fatalf("official integration rollback missing: %s", commands)
 	}
 }
 
