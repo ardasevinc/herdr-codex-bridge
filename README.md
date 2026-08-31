@@ -41,6 +41,25 @@ Herdr plugin, replaces Herdr's built-in Codex hook with the bridge hook, install
 the small Codex skill, and creates a host-local signing key. Restart a persistent
 Codex app-server afterward so it reloads the hook registry.
 
+Go-equipped hosts can install the same tagged helper with:
+
+```sh
+go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.0
+```
+
+GitHub releases also contain four platform archives, SHA-256 checksums, SBOMs,
+and keyless Sigstore bundles. Verify the signed checksum manifest before a
+manual install:
+
+```sh
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.0' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  checksums.txt
+shasum -a 256 -c checksums.txt --ignore-missing
+```
+
 Run `herdr-self doctor` to verify the installation. To remove it, preview and
 then apply `herdr-self teardown codex`; teardown restores the official Herdr
 Codex integration if setup found it installed.
@@ -49,9 +68,12 @@ Codex integration if setup found it installed.
 
 - The Herdr plugin observes only live pane output after Codex is detected.
 - Markers are HMAC-authenticated, nonce-bearing, and expire after two minutes.
+  This prevents accidental/model-generated claims, not malicious same-user
+  processes, which already have equivalent Herdr and Codex access.
 - Pane contents, marker text, signatures, and full thread IDs are never logged.
-- A thread must map to exactly one live native Herdr session. Ambiguous
-  caller-relative actions fail closed, while explicit targets remain usable.
+- A thread must map to exactly one live native Herdr session. Without that
+  proof, mutations fail closed; a conservative set of read-only commands still
+  delegates to upstream Herdr without caller context.
 - There is no telemetry and no runtime network access. Network is used only for
   installation and updates.
 - Codex hook trust is not bypassed. Codex may ask you to approve changed hooks.

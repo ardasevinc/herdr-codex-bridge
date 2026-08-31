@@ -20,6 +20,14 @@ trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
 
 curl --fail --location --silent --show-error "$base_url/$archive" --output "$temp_dir/$archive"
 curl --fail --location --silent --show-error "$base_url/checksums.txt" --output "$temp_dir/checksums.txt"
+if command -v cosign >/dev/null 2>&1; then
+  curl --fail --location --silent --show-error "$base_url/checksums.txt.sigstore.json" --output "$temp_dir/checksums.txt.sigstore.json"
+  cosign verify-blob \
+    --bundle "$temp_dir/checksums.txt.sigstore.json" \
+    --certificate-identity "https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v${version}" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    "$temp_dir/checksums.txt" >/dev/null
+fi
 expected="$(awk -v name="$archive" '$2 == name { print $1; exit }' "$temp_dir/checksums.txt")"
 [ -n "$expected" ] || { printf '%s\n' "checksum missing for $archive" >&2; exit 1; }
 if command -v shasum >/dev/null 2>&1; then
