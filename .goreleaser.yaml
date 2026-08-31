@@ -66,21 +66,24 @@ signs:
     output: true
     signature: "${artifact}.sigstore.json"
 
-brews:
+homebrew_casks:
   - name: herdr-codex-bridge
     repository:
       owner: ardasevinc
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/ardasevinc/herdr-codex-bridge
     description: "Native Herdr pane identity for centralized Codex app-server sessions"
     license: Apache-2.0
-    install: |
-      bin.install "herdr-self"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/herdr-self --version")
-      assert_match "dry run only", shell_output("#{bin}/herdr-self setup codex")
+    binaries:
+      - herdr-self
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/herdr-self"]
+          end
     ids:
       - default
 

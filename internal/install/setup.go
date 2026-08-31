@@ -70,7 +70,7 @@ func ResolvePaths() (Paths, error) {
 	}, nil
 }
 
-func SetupCodex(opts Options) error {
+func SetupCodex(opts Options) (retErr error) {
 	paths, err := ResolvePaths()
 	if err != nil {
 		return err
@@ -115,13 +115,47 @@ func SetupCodex(opts Options) error {
 	if err := ensureManagedFilesSafe(paths, opts.Force); err != nil {
 		return err
 	}
+	pluginBefore, err := capturePlugin()
+	if err != nil {
+		return err
+	}
+	filesBefore, err := captureFiles(paths.Hooks, paths.Skill, paths.Key, paths.State)
+	if err != nil {
+		return err
+	}
+	pluginChanged := false
+	officialRemoved := false
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		var rollbackErrs []error
+		if err := restoreFiles(filesBefore); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+		if officialRemoved {
+			if err := run("herdr", "integration", "install", "codex"); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if pluginChanged {
+			if err := restorePlugin(pluginBefore); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("rollback failed: %w", rollbackErr))
+		}
+	}()
 	if err := run("herdr", "plugin", "install", "ardasevinc/herdr-codex-bridge", "--ref", "v"+opts.Version, "--yes"); err != nil {
 		return err
 	}
+	pluginChanged = true
 	if officialInstalled {
 		if err := run("herdr", "integration", "uninstall", "codex"); err != nil {
 			return err
 		}
+		officialRemoved = true
 	}
 	if err := os.MkdirAll(paths.PluginConfigDir, 0o700); err != nil {
 		return err
@@ -147,10 +181,12 @@ func SetupCodex(opts Options) error {
 		return err
 	}
 	fmt.Fprintln(opts.Out, "setup applied; restart the centralized Codex app-server so it reloads hooks")
+	pluginChanged = false
+	officialRemoved = false
 	return nil
 }
 
-func TeardownCodex(opts Options) error {
+func TeardownCodex(opts Options) (retErr error) {
 	paths, err := ResolvePaths()
 	if err != nil {
 		return err
@@ -173,6 +209,38 @@ func TeardownCodex(opts Options) error {
 	if err := ensureManagedFilesSafe(paths, opts.Force); err != nil {
 		return err
 	}
+	pluginBefore, err := capturePlugin()
+	if err != nil {
+		return err
+	}
+	filesBefore, err := captureFiles(paths.Hooks, paths.Skill, paths.Key, paths.State)
+	if err != nil {
+		return err
+	}
+	officialInstalled := false
+	pluginRemoved := false
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		var rollbackErrs []error
+		if err := restoreFiles(filesBefore); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+		if officialInstalled {
+			if err := run("herdr", "integration", "uninstall", "codex"); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if pluginRemoved {
+			if err := restorePlugin(pluginBefore); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("rollback failed: %w", rollbackErr))
+		}
+	}()
 	if err := updateHooks(paths.Hooks, state.SessionCommand, state.PromptCommand, false); err != nil {
 		return err
 	}
@@ -183,16 +251,20 @@ func TeardownCodex(opts Options) error {
 		if err := run("herdr", "integration", "install", "codex"); err != nil {
 			return err
 		}
+		officialInstalled = true
 	}
 	if err := run("herdr", "plugin", "uninstall", bridgeconfig.PluginID); err != nil {
 		return err
 	}
+	pluginRemoved = true
 	for _, path := range []string{paths.Key, paths.State} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	fmt.Fprintln(opts.Out, "teardown applied; restart the centralized Codex app-server")
+	officialInstalled = false
+	pluginRemoved = false
 	return nil
 }
 

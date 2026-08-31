@@ -31,7 +31,7 @@ caller context is resolved and injected.
 Requirements: Herdr 0.8.2 or newer and Codex CLI 0.149.0 or newer.
 
 ```sh
-brew install ardasevinc/tap/herdr-codex-bridge
+brew install --cask ardasevinc/tap/herdr-codex-bridge
 herdr-self setup codex
 herdr-self setup codex --apply
 ```
