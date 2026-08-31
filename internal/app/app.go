@@ -97,7 +97,7 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 	case "--skill":
 		fmt.Fprintln(r.Stdout, "# Herdr Codex Bridge overlay")
 		fmt.Fprintln(r.Stdout)
-		fmt.Fprintln(r.Stdout, "Use herdr-self for caller-relative commands. Missing HERDR_ENV is expected with a centralized Codex app-server; inspect the mapping instead of refusing all Herdr operations.")
+		fmt.Fprintln(r.Stdout, "Use herdr-self for caller-relative commands. Missing HERDR_ENV is expected with a centralized Codex app-server; inspect the mapping instead of refusing all Herdr operations. Until mapping succeeds, herdr-self permits only its documented read-only commands; call upstream herdr directly for a necessary mutation only with a fully specified target.")
 		fmt.Fprintln(r.Stdout, "\n----- BEGIN UPSTREAM HERDR SKILL -----")
 		if err := r.runHerdr([]string{"--skill"}, nil); err != nil {
 			return err
@@ -152,10 +152,10 @@ func (r Runtime) delegate(ctx context.Context, client *herdr.Client, args []stri
 		if !errors.Is(err, bridge.ErrUnmapped) && !errors.Is(err, bridge.ErrAmbiguous) {
 			return err
 		}
-		if contains(args, "--current") {
-			return fmt.Errorf("%w; refusing caller-relative --current operation", err)
+		if !safeWithoutCaller(args) {
+			return fmt.Errorf("%w; refusing command without a proven caller pane (use upstream herdr directly for an explicit operation)", err)
 		}
-		fmt.Fprintf(r.Stderr, "herdr-self: warning: %v; delegating without caller context, so use only global reads or explicit targets\n", err)
+		fmt.Fprintf(r.Stderr, "herdr-self: warning: %v; delegating this read-only command without caller context\n", err)
 		return r.execHerdr(args, r.Environ)
 	}
 	env := append([]string{}, r.Environ...)
@@ -165,6 +165,28 @@ func (r Runtime) delegate(ctx context.Context, client *herdr.Client, args []stri
 	env = setEnv(env, "HERDR_TAB_ID", association.TabID)
 	env = setEnv(env, "HERDR_PANE_ID", association.PaneID)
 	return r.execHerdr(args, env)
+}
+
+func safeWithoutCaller(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if args[0] == "status" || args[0] == "--version" || args[0] == "-V" || args[0] == "--default-config" {
+		return true
+	}
+	if len(args) < 2 {
+		return false
+	}
+	readOnly := map[string]map[string]bool{
+		"workspace":   {"list": true, "get": true},
+		"tab":         {"list": true, "get": true},
+		"pane":        {"list": true, "get": true, "layout": true, "process-info": true, "neighbor": true, "edges": true, "read": true, "wait-output": true},
+		"agent":       {"list": true, "get": true, "read": true, "wait": true, "explain": true},
+		"plugin":      {"list": true, "config-dir": true, "log": true, "logs": true},
+		"session":     {"list": true},
+		"integration": {"status": true},
+	}
+	return readOnly[args[0]][args[1]]
 }
 
 func (r Runtime) execHerdr(args, env []string) error {
@@ -223,21 +245,25 @@ func (r Runtime) runWatch(ctx context.Context, args []string, client *herdr.Clie
 	paneID := envValue(r.Environ, "HERDR_PANE_ID")
 	keyPath := filepath.Join(envValue(r.Environ, "HERDR_PLUGIN_CONFIG_DIR"), "bridge.key")
 	startedAt := r.Now()
-	if eventJSON := envValue(r.Environ, "HERDR_PLUGIN_EVENT_JSON"); eventJSON != "" {
+	eventName := envValue(r.Environ, "HERDR_PLUGIN_EVENT")
+	timeout := 5 * time.Second
+	if eventName == "pane.agent_detected" {
+		timeout = 10 * time.Minute
+		eventJSON := envValue(r.Environ, "HERDR_PLUGIN_EVENT_JSON")
 		var event struct {
 			Data struct {
 				Agent    string `json:"agent"`
 				Released bool   `json:"released"`
 			} `json:"data"`
 		}
-		if json.Unmarshal([]byte(eventJSON), &event) == nil && (event.Data.Agent != "codex" || event.Data.Released) {
+		if eventJSON == "" || json.Unmarshal([]byte(eventJSON), &event) != nil || event.Data.Agent != "codex" || event.Data.Released {
 			return nil
 		}
 	}
 	if paneID == "" || keyPath == "bridge.key" {
 		return errors.New("plugin watcher requires HERDR_PANE_ID and HERDR_PLUGIN_CONFIG_DIR")
 	}
-	return bridge.WatchPane(ctx, client, paneID, keyPath, startedAt)
+	return bridge.WatchPane(ctx, client, paneID, keyPath, startedAt, timeout)
 }
 
 func takeOption(args []string, name string) (string, []string, error) {

@@ -11,9 +11,10 @@ your Codex thread to Herdr's native live-pane association, injects the normal
 
 `HERDR_ENV` being unset is normal when Codex uses a centralized app-server. Do not
 panic or refuse all Herdr work solely for that reason. Run `herdr-self` with no
-arguments to inspect your association. If it reports pending, global commands and
-commands with explicit targets remain safe; only caller-relative actions must wait.
-If it reports ambiguity, do not guess which pane is yours.
+arguments to inspect your association. If it reports pending, `herdr-self` still
+permits its documented read-only commands but refuses mutations. A necessary
+explicit mutation can use upstream `herdr` directly only with a fully specified
+target. If it reports ambiguity, do not guess which pane is yours.
 
 For Herdr's complete live instructions, run `herdr-self --skill`. For combined
 bridge and upstream CLI help, run `herdr-self --help`. `herdr-self doctor` is

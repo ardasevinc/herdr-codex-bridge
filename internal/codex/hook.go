@@ -99,7 +99,7 @@ func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, clien
 			return writeContext(out, "UserPromptSubmit", associationContext(association))
 		}
 		if errors.Is(err, bridge.ErrAmbiguous) {
-			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. Caller-relative herdr-self actions are unsafe until the duplicate mapping is resolved; explicit Herdr targets remain available.")
+			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
 		}
 		if time.Now().After(deadline) {
 			return writeContext(out, "UserPromptSubmit", pendingContext(input.SessionID))
@@ -116,7 +116,7 @@ func writeContext(out io.Writer, event, additionalContext string) error {
 }
 
 func pendingContext(threadID string) string {
-	return "Herdr Codex Bridge knows this Codex thread as " + threadID + ". Its live pane association may still be pending. Use herdr-self for caller-relative Herdr actions; missing HERDR_ENV alone is expected with a centralized Codex app-server and is not a reason to refuse global or explicitly targeted Herdr operations."
+	return "Herdr Codex Bridge knows this Codex thread as " + threadID + ". Its live pane association may still be pending. Missing HERDR_ENV alone is expected with a centralized Codex app-server. herdr-self still permits its documented read-only commands, but refuses mutations until mapping succeeds; call upstream herdr directly only when you have a fully specified explicit target."
 }
 
 func nativeContext(threadID, workspaceID, tabID, paneID string) string {

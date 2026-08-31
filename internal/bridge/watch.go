@@ -15,20 +15,15 @@ import (
 
 const (
 	watchInterval = 150 * time.Millisecond
-	watchTimeout  = 10 * time.Minute
 )
 
-func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string, startedAt time.Time) error {
+func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string, startedAt time.Time, timeout time.Duration) error {
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
 		return fmt.Errorf("read bridge key: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, watchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if paneAlreadyMapped(ctx, client, paneID) {
-		return nil
-	}
-
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
 	var lastRevision uint64
@@ -42,8 +37,8 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 			return ctx.Err()
 		case now := <-ticker.C:
 			if !now.Before(nextLivenessCheck) {
-				alive, mapped := paneLiveState(ctx, client, paneID)
-				if !alive || mapped {
+				alive, _ := paneLiveState(ctx, client, paneID)
+				if !alive {
 					return nil
 				}
 				nextLivenessCheck = now.Add(2 * time.Second)
@@ -68,14 +63,31 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 			reportCtx, reportCancel := context.WithTimeout(ctx, time.Second)
 			err := client.ReportSession(reportCtx, paneID, marker.SessionID, marker.Source, uint64(now.UnixNano()))
 			reportCancel()
-			return err
+			if err != nil {
+				return err
+			}
+			verifyCtx, verifyCancel := context.WithTimeout(ctx, time.Second)
+			mapped := paneMappedTo(verifyCtx, client, paneID, marker.SessionID)
+			verifyCancel()
+			if mapped {
+				return nil
+			}
+			return errors.New("Herdr accepted the session report but did not expose the expected pane mapping")
 		}
 	}
 }
 
-func paneAlreadyMapped(ctx context.Context, client *herdr.Client, paneID string) bool {
-	_, mapped := paneLiveState(ctx, client, paneID)
-	return mapped
+func paneMappedTo(ctx context.Context, client *herdr.Client, paneID, sessionID string) bool {
+	panes, err := client.Panes(ctx)
+	if err != nil {
+		return false
+	}
+	for _, pane := range panes {
+		if pane.PaneID == paneID {
+			return pane.AgentSession != nil && pane.AgentSession.Agent == "codex" && pane.AgentSession.Value == sessionID
+		}
+	}
+	return false
 }
 
 func paneLiveState(ctx context.Context, client *herdr.Client, paneID string) (alive, mapped bool) {

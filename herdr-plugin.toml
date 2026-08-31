@@ -11,3 +11,10 @@ command = ["sh", "scripts/install-plugin-worker.sh"]
 [[events]]
 on = "pane.agent_detected"
 command = ["bin/herdr-self", "_watch"]
+
+# SessionStart can replace the thread inside an existing Codex process after
+# /clear. The next prompt changes agent status, providing a fresh one-shot
+# watcher without keeping a pane-lifetime plugin process resident.
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bin/herdr-self", "_watch"]
