@@ -67,6 +67,13 @@ type PaneRead struct {
 	Truncated   bool   `json:"truncated"`
 }
 
+type Plugin struct {
+	PluginID   string `json:"plugin_id"`
+	Version    string `json:"version"`
+	Enabled    bool   `json:"enabled"`
+	PluginRoot string `json:"plugin_root"`
+}
+
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
 	if c.SocketPath == "" {
 		return errors.New("Herdr socket path is empty")
@@ -130,6 +137,14 @@ func (c *Client) ReadPane(ctx context.Context, paneID string, lines uint32) (Pan
 		"format":  "text",
 	}, &result)
 	return result.Read, err
+}
+
+func (c *Client) Plugins(ctx context.Context) ([]Plugin, error) {
+	var result struct {
+		Plugins []Plugin `json:"plugins"`
+	}
+	err := c.Call(ctx, "plugin.list", map[string]any{}, &result)
+	return result.Plugins, err
 }
 
 func (c *Client) ReportSession(ctx context.Context, paneID, sessionID, source string, sequence uint64) error {

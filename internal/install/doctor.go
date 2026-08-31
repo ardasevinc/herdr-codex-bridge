@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ardasevinc/herdr-codex-bridge/internal/bridge"
+	"github.com/ardasevinc/herdr-codex-bridge/internal/compat"
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
 )
@@ -50,6 +52,8 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 	}
 	_, err = exec.LookPath("herdr")
 	add("herdr_binary", err, "herdr is available on PATH")
+	add("herdr_version", minimumCommandVersion("herdr", "0.8.2"), "Herdr is compatible")
+	add("codex_version", minimumCommandVersion("codex", "0.149.0"), "Codex is compatible")
 	client := &herdr.Client{SocketPath: socketPath}
 	pingCtx, cancel := context.WithTimeout(ctx, time.Second)
 	err = client.Ping(pingCtx)
@@ -58,6 +62,11 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 	state, stateErr := loadState(paths.State)
 	add("install_state", stateErr, paths.State)
 	if stateErr == nil {
+		if _, binaryErr := os.Stat(state.BinaryPath); binaryErr != nil {
+			add("global_helper", binaryErr, state.BinaryPath)
+		} else {
+			add("global_helper", nil, state.BinaryPath)
+		}
 		data, readErr := os.ReadFile(state.SkillPath)
 		if readErr == nil && digest(data) != state.SkillSHA256 {
 			readErr = errors.New("managed skill hash differs from install state")
@@ -73,6 +82,29 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 			hookErr = errors.New("bridge hook commands are missing or drifted")
 		}
 		add("codex_hooks", hookErr, paths.Hooks)
+	}
+	plugins, pluginsErr := client.Plugins(ctx)
+	if pluginsErr != nil {
+		add("herdr_plugin", pluginsErr, "")
+	} else {
+		var found *herdr.Plugin
+		for index := range plugins {
+			if plugins[index].PluginID == bridgeconfig.PluginID {
+				found = &plugins[index]
+				break
+			}
+		}
+		if found == nil {
+			add("herdr_plugin", errors.New("Herdr plugin is not installed"), "")
+		} else if !found.Enabled {
+			add("herdr_plugin", errors.New("Herdr plugin is disabled"), found.Version)
+		} else if stateErr == nil && found.Version != state.BridgeVersion {
+			add("herdr_plugin", fmt.Errorf("plugin %s differs from helper %s", found.Version, state.BridgeVersion), found.PluginRoot)
+		} else if _, workerErr := os.Stat(filepath.Join(found.PluginRoot, "bin", "herdr-self")); workerErr != nil {
+			add("herdr_plugin", fmt.Errorf("pane worker missing: %w", workerErr), found.PluginRoot)
+		} else {
+			add("herdr_plugin", nil, fmt.Sprintf("%s at %s", found.Version, found.PluginRoot))
+		}
 	}
 	if officialCodexInstalled() {
 		add("official_integration_conflict", errors.New("official Herdr Codex integration is also installed"), "")
@@ -96,6 +128,22 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 	}
 	if !report.OK {
 		return errors.New("doctor found bridge problems")
+	}
+	return nil
+}
+
+func minimumCommandVersion(name, minimumText string) error {
+	output, err := exec.Command(name, "--version").CombinedOutput()
+	if err != nil {
+		return err
+	}
+	actual, err := compat.Extract(string(output))
+	if err != nil {
+		return err
+	}
+	minimum, _ := compat.Parse(minimumText)
+	if !compat.AtLeast(actual, minimum) {
+		return fmt.Errorf("%s %s or newer is required", name, minimumText)
 	}
 	return nil
 }

@@ -1,0 +1,105 @@
+version: 2
+
+project_name: herdr-codex-bridge
+
+before:
+  hooks:
+    - go mod verify
+    - go test ./...
+
+builds:
+  - id: herdr-self
+    main: ./cmd/herdr-self
+    binary: herdr-self
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ardasevinc/herdr-codex-bridge/internal/version.Version={{ .Version }} -X github.com/ardasevinc/herdr-codex-bridge/internal/version.Commit={{ .FullCommit }} -X github.com/ardasevinc/herdr-codex-bridge/internal/version.Date={{ .Date }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    ids:
+      - herdr-self
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - herdr-plugin.toml
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - id: archives
+    cmd: cosign
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+    artifacts: archive
+    output: true
+    signature: "${artifact}.sigstore.json"
+  - id: checksums
+    cmd: cosign
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+    artifacts: checksum
+    output: true
+    signature: "${artifact}.sigstore.json"
+
+brews:
+  - name: herdr-codex-bridge
+    repository:
+      owner: ardasevinc
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/ardasevinc/herdr-codex-bridge
+    description: "Native Herdr pane identity for centralized Codex app-server sessions"
+    license: Apache-2.0
+    install: |
+      bin.install "herdr-self"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/herdr-self --version")
+      assert_match "dry run only", shell_output("#{bin}/herdr-self setup codex")
+    ids:
+      - default
+
+release:
+  github:
+    owner: ardasevinc
+    name: herdr-codex-bridge
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"

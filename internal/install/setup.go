@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ardasevinc/herdr-codex-bridge/internal/assets"
+	"github.com/ardasevinc/herdr-codex-bridge/internal/compat"
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
 )
 
@@ -91,6 +92,9 @@ func SetupCodex(opts Options) error {
 	}
 	if !filepath.IsAbs(opts.BinaryPath) {
 		return errors.New("herdr-self executable path must be absolute")
+	}
+	if err := preflight(paths); err != nil {
+		return err
 	}
 	officialInstalled := officialCodexInstalled()
 	sessionCommand := hookCommand(opts.BinaryPath, "session-start", paths.Key, opts.SocketPath)
@@ -207,7 +211,7 @@ func loadState(path string) (State, error) {
 func ensureManagedFilesSafe(paths Paths, force bool) error {
 	state, err := loadState(paths.State)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(errors.Unwrap(err), os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
@@ -215,6 +219,43 @@ func ensureManagedFilesSafe(paths Paths, force bool) error {
 	data, err := os.ReadFile(state.SkillPath)
 	if err == nil && digest(data) != state.SkillSHA256 && !force {
 		return errors.New("managed Codex skill was modified locally; rerun with --force to replace it")
+	}
+	return nil
+}
+
+func preflight(paths Paths) error {
+	if info, err := os.Stat(paths.CodexHome); err != nil || !info.IsDir() {
+		return fmt.Errorf("Codex home not found at %s", paths.CodexHome)
+	}
+	if data, err := os.ReadFile(paths.Hooks); err == nil {
+		var value any
+		if err := json.Unmarshal(data, &value); err != nil {
+			return fmt.Errorf("parse %s: %w", paths.Hooks, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	checks := []struct {
+		name    string
+		args    []string
+		minimum string
+	}{
+		{name: "herdr", args: []string{"--version"}, minimum: "0.8.2"},
+		{name: "codex", args: []string{"--version"}, minimum: "0.149.0"},
+	}
+	for _, check := range checks {
+		output, err := exec.Command(check.name, check.args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("run %s --version: %w", check.name, err)
+		}
+		actual, err := compat.Extract(string(output))
+		if err != nil {
+			return fmt.Errorf("parse %s version: %w", check.name, err)
+		}
+		minimum, _ := compat.Parse(check.minimum)
+		if !compat.AtLeast(actual, minimum) {
+			return fmt.Errorf("%s %s or newer is required", check.name, check.minimum)
+		}
 	}
 	return nil
 }

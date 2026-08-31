@@ -144,7 +144,14 @@ func (r Runtime) association(ctx context.Context, client *herdr.Client) (bridge.
 func (r Runtime) delegate(ctx context.Context, client *herdr.Client, args []string, socketPath string) error {
 	association, err := r.association(ctx, client)
 	if err != nil {
-		return err
+		if !errors.Is(err, bridge.ErrUnmapped) && !errors.Is(err, bridge.ErrAmbiguous) {
+			return err
+		}
+		if contains(args, "--current") {
+			return fmt.Errorf("%w; refusing caller-relative --current operation", err)
+		}
+		fmt.Fprintf(r.Stderr, "herdr-self: warning: %v; delegating without caller context, so use only global reads or explicit targets\n", err)
+		return r.execHerdr(args, r.Environ)
 	}
 	env := append([]string{}, r.Environ...)
 	env = setEnv(env, "HERDR_ENV", "1")
@@ -152,6 +159,10 @@ func (r Runtime) delegate(ctx context.Context, client *herdr.Client, args []stri
 	env = setEnv(env, "HERDR_WORKSPACE_ID", association.WorkspaceID)
 	env = setEnv(env, "HERDR_TAB_ID", association.TabID)
 	env = setEnv(env, "HERDR_PANE_ID", association.PaneID)
+	return r.execHerdr(args, env)
+}
+
+func (r Runtime) execHerdr(args, env []string) error {
 	binary, err := exec.LookPath("herdr")
 	if err != nil {
 		return errors.New("herdr executable not found on PATH")
