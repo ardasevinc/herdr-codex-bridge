@@ -73,9 +73,11 @@ func removeEmptyParents(path string) {
 }
 
 type pluginSnapshot struct {
-	present      bool
-	source       string
-	requestedRef string
+	present        bool
+	enabled        bool
+	source         string
+	requestedRef   string
+	resolvedCommit string
 }
 
 func capturePlugin() (pluginSnapshot, error) {
@@ -87,6 +89,7 @@ func capturePlugin() (pluginSnapshot, error) {
 		Result struct {
 			Plugins []struct {
 				PluginID string `json:"plugin_id"`
+				Enabled  bool   `json:"enabled"`
 				Source   struct {
 					Kind           string `json:"kind"`
 					Owner          string `json:"owner"`
@@ -112,22 +115,48 @@ func capturePlugin() (pluginSnapshot, error) {
 		if plugin.Source.Subdir != "" {
 			source += "/" + plugin.Source.Subdir
 		}
-		ref := plugin.Source.RequestedRef
-		if ref == "" {
-			ref = plugin.Source.ResolvedCommit
-		}
-		return pluginSnapshot{present: true, source: source, requestedRef: ref}, nil
+		return pluginSnapshot{
+			present: true, enabled: plugin.Enabled, source: source,
+			requestedRef: plugin.Source.RequestedRef, resolvedCommit: plugin.Source.ResolvedCommit,
+		}, nil
 	}
 	return pluginSnapshot{}, nil
 }
 
 func restorePlugin(snapshot pluginSnapshot) error {
+	current, err := capturePlugin()
+	if err != nil {
+		return err
+	}
 	if !snapshot.present {
+		if !current.present {
+			return nil
+		}
 		return run("herdr", "plugin", "uninstall", "herdr-codex-bridge")
 	}
-	args := []string{"plugin", "install", snapshot.source, "--yes"}
-	if snapshot.requestedRef != "" {
-		args = append(args, "--ref", snapshot.requestedRef)
+	if current.present && current.source == snapshot.source && current.resolvedCommit == snapshot.resolvedCommit {
+		if current.enabled == snapshot.enabled {
+			return nil
+		}
+		verb := "disable"
+		if snapshot.enabled {
+			verb = "enable"
+		}
+		return run("herdr", "plugin", verb, "herdr-codex-bridge")
 	}
-	return run("herdr", args...)
+	args := []string{"plugin", "install", snapshot.source, "--yes"}
+	ref := snapshot.resolvedCommit
+	if ref == "" {
+		ref = snapshot.requestedRef
+	}
+	if ref != "" {
+		args = append(args, "--ref", ref)
+	}
+	if err := run("herdr", args...); err != nil {
+		return err
+	}
+	if !snapshot.enabled {
+		return run("herdr", "plugin", "disable", "herdr-codex-bridge")
+	}
+	return nil
 }

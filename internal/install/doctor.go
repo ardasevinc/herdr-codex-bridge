@@ -15,6 +15,7 @@ import (
 	"github.com/ardasevinc/herdr-codex-bridge/internal/compat"
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
+	"github.com/ardasevinc/herdr-codex-bridge/internal/protocol"
 )
 
 type Check struct {
@@ -63,8 +64,12 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 	cancel()
 	add("herdr_socket", err, socketPath)
 	state, stateErr := loadState(paths.State)
+	if stateErr == nil {
+		stateErr = validateStatePaths(paths, state)
+	}
 	add("install_state", stateErr, paths.State)
 	if stateErr == nil {
+		paths.Hooks, paths.Skill, paths.Key, paths.State = state.HooksPath, state.SkillPath, state.KeyPath, state.StatePath
 		if _, binaryErr := os.Stat(state.BinaryPath); binaryErr != nil {
 			add("global_helper", binaryErr, state.BinaryPath)
 		} else {
@@ -75,10 +80,7 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 			readErr = errors.New("managed skill hash differs from install state")
 		}
 		add("codex_skill", readErr, state.SkillPath)
-		keyInfo, keyErr := os.Stat(paths.Key)
-		if keyErr == nil && keyInfo.Mode().Perm()&0o077 != 0 {
-			keyErr = errors.New("bridge key permissions must be 0600")
-		}
+		keyErr := validateBridgeKey(paths.Key)
 		add("bridge_key", keyErr, paths.Key)
 		hookData, hookErr := os.ReadFile(paths.Hooks)
 		if hookErr == nil && (!strings.Contains(string(hookData), state.SessionCommand) || !strings.Contains(string(hookData), state.PromptCommand)) {
@@ -127,13 +129,49 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 	if jsonOutput {
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
+		if err := encoder.Encode(report); err != nil {
+			return err
+		}
+		if !report.OK {
+			return errors.New("doctor found bridge problems")
+		}
+		return nil
 	}
 	for _, check := range report.Checks {
 		fmt.Fprintf(out, "%-8s %-30s %s\n", check.Status, check.Name, check.Message)
 	}
 	if !report.OK {
 		return errors.New("doctor found bridge problems")
+	}
+	return nil
+}
+
+func validateBridgeKey(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() != 32 {
+		return errors.New("bridge key must be a 32-byte regular file")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return errors.New("bridge key permissions must be 0600")
+	}
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	marker, err := protocol.New("doctor-self-test", "startup", now)
+	if err != nil {
+		return err
+	}
+	line, err := marker.Sign(key)
+	if err != nil {
+		return err
+	}
+	if _, err := protocol.ParseAndVerify(line, key, now); err != nil {
+		return fmt.Errorf("bridge key self-test: %w", err)
 	}
 	return nil
 }

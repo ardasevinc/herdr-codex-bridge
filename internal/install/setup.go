@@ -34,7 +34,11 @@ type State struct {
 	BridgeVersion        string `json:"bridge_version"`
 	BinaryPath           string `json:"binary_path"`
 	SocketPath           string `json:"socket_path"`
+	CodexHome            string `json:"codex_home"`
+	HooksPath            string `json:"hooks_path"`
 	SkillPath            string `json:"skill_path"`
+	KeyPath              string `json:"key_path"`
+	StatePath            string `json:"state_path"`
 	SkillSHA256          string `json:"skill_sha256"`
 	SessionCommand       string `json:"session_command"`
 	PromptCommand        string `json:"prompt_command"`
@@ -96,7 +100,19 @@ func SetupCodex(opts Options) (retErr error) {
 	if err := preflight(paths); err != nil {
 		return err
 	}
+	previous, previousErr := loadState(paths.State)
+	if previousErr == nil {
+		if err := validateStatePaths(paths, previous); err != nil {
+			return err
+		}
+	} else if !errors.Is(previousErr, os.ErrNotExist) {
+		return previousErr
+	}
 	officialInstalled := officialCodexInstalled()
+	officialWasInstalled := officialInstalled
+	if previousErr == nil {
+		officialWasInstalled = previous.OfficialWasInstalled || officialInstalled
+	}
 	sessionCommand := hookCommand(opts.BinaryPath, "session-start", paths.Key, opts.SocketPath)
 	promptCommand := hookCommand(opts.BinaryPath, "user-prompt-submit", paths.Key, opts.SocketPath)
 	fmt.Fprintf(opts.Out, "Herdr Codex Bridge setup plan\n")
@@ -123,8 +139,6 @@ func SetupCodex(opts Options) (retErr error) {
 	if err != nil {
 		return err
 	}
-	pluginChanged := false
-	officialRemoved := false
 	defer func() {
 		if retErr == nil {
 			return
@@ -133,15 +147,11 @@ func SetupCodex(opts Options) (retErr error) {
 		if err := restoreFiles(filesBefore); err != nil {
 			rollbackErrs = append(rollbackErrs, err)
 		}
-		if officialRemoved {
-			if err := run("herdr", "integration", "install", "codex"); err != nil {
-				rollbackErrs = append(rollbackErrs, err)
-			}
+		if err := restoreOfficialIntegration(officialInstalled); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
 		}
-		if pluginChanged {
-			if err := restorePlugin(pluginBefore); err != nil {
-				rollbackErrs = append(rollbackErrs, err)
-			}
+		if err := restorePlugin(pluginBefore); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
 		}
 		if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("rollback failed: %w", rollbackErr))
@@ -150,12 +160,10 @@ func SetupCodex(opts Options) (retErr error) {
 	if err := run("herdr", "plugin", "install", "ardasevinc/herdr-codex-bridge", "--ref", "v"+opts.Version, "--yes"); err != nil {
 		return err
 	}
-	pluginChanged = true
 	if officialInstalled {
 		if err := run("herdr", "integration", "uninstall", "codex"); err != nil {
 			return err
 		}
-		officialRemoved = true
 	}
 	if err := os.MkdirAll(paths.PluginConfigDir, 0o700); err != nil {
 		return err
@@ -171,9 +179,10 @@ func SetupCodex(opts Options) (retErr error) {
 	}
 	state := State{
 		SchemaVersion: stateVersion, BridgeVersion: opts.Version, BinaryPath: opts.BinaryPath,
-		SocketPath: opts.SocketPath, SkillPath: paths.Skill, SkillSHA256: digest(assets.CodexSkill),
+		SocketPath: opts.SocketPath, CodexHome: paths.CodexHome, HooksPath: paths.Hooks,
+		SkillPath: paths.Skill, KeyPath: paths.Key, StatePath: paths.State, SkillSHA256: digest(assets.CodexSkill),
 		SessionCommand: sessionCommand, PromptCommand: promptCommand,
-		OfficialWasInstalled: officialInstalled, InstalledAt: time.Now().UTC().Format(time.RFC3339),
+		OfficialWasInstalled: officialWasInstalled, InstalledAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	data, _ := json.MarshalIndent(state, "", "  ")
 	data = append(data, '\n')
@@ -181,8 +190,6 @@ func SetupCodex(opts Options) (retErr error) {
 		return err
 	}
 	fmt.Fprintln(opts.Out, "setup applied; restart the centralized Codex app-server so it reloads hooks")
-	pluginChanged = false
-	officialRemoved = false
 	return nil
 }
 
@@ -198,6 +205,10 @@ func TeardownCodex(opts Options) (retErr error) {
 	if err != nil {
 		return err
 	}
+	if err := validateStatePaths(paths, state); err != nil {
+		return err
+	}
+	paths.Hooks, paths.Skill, paths.Key, paths.State = state.HooksPath, state.SkillPath, state.KeyPath, state.StatePath
 	fmt.Fprintln(opts.Out, "Herdr Codex Bridge teardown plan")
 	fmt.Fprintf(opts.Out, "  remove bridge hooks from: %s\n", paths.Hooks)
 	fmt.Fprintf(opts.Out, "  remove managed skill: %s\n", paths.Skill)
@@ -217,8 +228,7 @@ func TeardownCodex(opts Options) (retErr error) {
 	if err != nil {
 		return err
 	}
-	officialInstalled := false
-	pluginRemoved := false
+	officialBefore := officialCodexInstalled()
 	defer func() {
 		if retErr == nil {
 			return
@@ -227,15 +237,11 @@ func TeardownCodex(opts Options) (retErr error) {
 		if err := restoreFiles(filesBefore); err != nil {
 			rollbackErrs = append(rollbackErrs, err)
 		}
-		if officialInstalled {
-			if err := run("herdr", "integration", "uninstall", "codex"); err != nil {
-				rollbackErrs = append(rollbackErrs, err)
-			}
+		if err := restoreOfficialIntegration(officialBefore); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
 		}
-		if pluginRemoved {
-			if err := restorePlugin(pluginBefore); err != nil {
-				rollbackErrs = append(rollbackErrs, err)
-			}
+		if err := restorePlugin(pluginBefore); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
 		}
 		if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("rollback failed: %w", rollbackErr))
@@ -251,20 +257,16 @@ func TeardownCodex(opts Options) (retErr error) {
 		if err := run("herdr", "integration", "install", "codex"); err != nil {
 			return err
 		}
-		officialInstalled = true
 	}
 	if err := run("herdr", "plugin", "uninstall", bridgeconfig.PluginID); err != nil {
 		return err
 	}
-	pluginRemoved = true
 	for _, path := range []string{paths.Key, paths.State} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	fmt.Fprintln(opts.Out, "teardown applied; restart the centralized Codex app-server")
-	officialInstalled = false
-	pluginRemoved = false
 	return nil
 }
 
@@ -278,6 +280,19 @@ func loadState(path string) (State, error) {
 		return State{}, fmt.Errorf("decode bridge install state: %w", err)
 	}
 	return state, nil
+}
+
+func validateStatePaths(paths Paths, state State) error {
+	if state.SchemaVersion != stateVersion {
+		return fmt.Errorf("unsupported bridge install state schema %d", state.SchemaVersion)
+	}
+	if state.CodexHome == "" || state.HooksPath == "" || state.SkillPath == "" || state.KeyPath == "" || state.StatePath == "" {
+		return errors.New("bridge install state is missing managed paths; rerun setup with the original CODEX_HOME")
+	}
+	if filepath.Clean(paths.CodexHome) != filepath.Clean(state.CodexHome) || filepath.Clean(paths.State) != filepath.Clean(state.StatePath) {
+		return fmt.Errorf("current CODEX_HOME does not match bridge install state: current=%s installed=%s", paths.CodexHome, state.CodexHome)
+	}
+	return nil
 }
 
 func ensureManagedFilesSafe(paths Paths, force bool) error {
@@ -334,6 +349,9 @@ func preflight(paths Paths) error {
 
 func ensureKey(path string) error {
 	if info, err := os.Stat(path); err == nil {
+		if !info.Mode().IsRegular() || info.Size() != 32 {
+			return errors.New("bridge key must be a 32-byte regular file")
+		}
 		if info.Mode().Perm()&0o077 != 0 {
 			return errors.New("bridge key permissions are too broad; expected 0600")
 		}
@@ -346,6 +364,17 @@ func ensureKey(path string) error {
 		return err
 	}
 	return writeAtomic(path, key, 0o600)
+}
+
+func restoreOfficialIntegration(wantInstalled bool) error {
+	installed := officialCodexInstalled()
+	if installed == wantInstalled {
+		return nil
+	}
+	if wantInstalled {
+		return run("herdr", "integration", "install", "codex")
+	}
+	return run("herdr", "integration", "uninstall", "codex")
 }
 
 func officialCodexInstalled() bool {

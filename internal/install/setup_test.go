@@ -22,12 +22,21 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(root, "commands.log")
+	officialState := filepath.Join(root, "official-installed")
+	pluginState := filepath.Join(root, "plugin-installed")
+	if err := os.WriteFile(officialState, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	herdrScript := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
 		"case \"$*\" in\n" +
 		"  '--version') echo 'herdr 0.8.2' ;;\n" +
-		"  'integration status') echo 'codex: current (v8)' ;;\n" +
-		"  'plugin list --json') echo '{\"id\":\"test\",\"result\":{\"plugins\":[],\"type\":\"plugin_list\"}}' ;;\n" +
+		"  'integration status') test -f " + shellQuote(officialState) + " && echo 'codex: current (v8)' ;;\n" +
+		"  'integration uninstall codex') rm -f " + shellQuote(officialState) + " ;;\n" +
+		"  'integration install codex') : > " + shellQuote(officialState) + " ;;\n" +
+		"  'plugin install '* ) : > " + shellQuote(pluginState) + " ;;\n" +
+		"  'plugin uninstall herdr-codex-bridge') rm -f " + shellQuote(pluginState) + " ;;\n" +
+		"  'plugin list --json') if test -f " + shellQuote(pluginState) + "; then echo '{\"id\":\"test\",\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-codex-bridge\",\"enabled\":true,\"source\":{\"kind\":\"github\",\"owner\":\"ardasevinc\",\"repo\":\"herdr-codex-bridge\",\"requested_ref\":\"v0.1.0\",\"resolved_commit\":\"abc\"}}]}}'; else echo '{\"id\":\"test\",\"result\":{\"plugins\":[]}}'; fi ;;\n" +
 		"esac\n"
 	writeExecutable(t, filepath.Join(binDir, "herdr"), herdrScript)
 	writeExecutable(t, filepath.Join(binDir, "codex"), "#!/bin/sh\necho 'codex-cli 0.149.0'\n")
@@ -46,7 +55,14 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 	if err := SetupCodex(opts); err != nil {
 		t.Fatal(err)
 	}
+	if err := SetupCodex(opts); err != nil {
+		t.Fatalf("repeat setup: %v", err)
+	}
 	paths, _ := ResolvePaths()
+	state, err := loadState(paths.State)
+	if err != nil || !state.OfficialWasInstalled {
+		t.Fatalf("repeat setup forgot original integration state: %#v, %v", state, err)
+	}
 	for _, path := range []string{paths.State, paths.Key, paths.Skill} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
@@ -56,6 +72,15 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 	if !strings.Contains(string(hooks), "herdr-self") || !strings.Contains(string(hooks), "guard") {
 		t.Fatalf("unexpected installed hooks: %s", hooks)
 	}
+	otherCodexHome := filepath.Join(root, "other-codex")
+	if err := os.MkdirAll(otherCodexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", otherCodexHome)
+	if err := TeardownCodex(Options{Out: out}); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("teardown with another CODEX_HOME = %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
 	if err := TeardownCodex(opts); err != nil {
 		t.Fatal(err)
 	}
@@ -92,12 +117,15 @@ func TestSetupRollsBackPluginWhenOfficialHookRemovalFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(root, "commands.log")
+	pluginState := filepath.Join(root, "plugin-installed")
 	herdrScript := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
 		"case \"$*\" in\n" +
 		"  '--version') echo 'herdr 0.8.2' ;;\n" +
 		"  'integration status') echo 'codex: current (v8)' ;;\n" +
-		"  'plugin list --json') echo '{\"id\":\"test\",\"result\":{\"plugins\":[]}}' ;;\n" +
+		"  'plugin list --json') if test -f " + shellQuote(pluginState) + "; then echo '{\"id\":\"test\",\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-codex-bridge\",\"enabled\":true,\"source\":{\"kind\":\"github\",\"owner\":\"ardasevinc\",\"repo\":\"herdr-codex-bridge\",\"resolved_commit\":\"abc\"}}]}}'; else echo '{\"id\":\"test\",\"result\":{\"plugins\":[]}}'; fi ;;\n" +
+		"  'plugin install '* ) : > " + shellQuote(pluginState) + " ;;\n" +
+		"  'plugin uninstall herdr-codex-bridge') rm -f " + shellQuote(pluginState) + " ;;\n" +
 		"  'integration uninstall codex') exit 7 ;;\n" +
 		"esac\n"
 	writeExecutable(t, filepath.Join(binDir, "herdr"), herdrScript)
