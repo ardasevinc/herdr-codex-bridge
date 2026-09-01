@@ -5,8 +5,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/protocol"
 )
+
+func TestPaneSnapshotCursorUsesTextWhenRevisionIsUnavailable(t *testing.T) {
+	var cursor paneSnapshotCursor
+	if !cursor.changed(herdr.PaneRead{Revision: 0, Text: "before"}) {
+		t.Fatal("first revision-zero snapshot was ignored")
+	}
+	if cursor.changed(herdr.PaneRead{Revision: 0, Text: "before"}) {
+		t.Fatal("unchanged revision-zero snapshot was treated as new")
+	}
+	if !cursor.changed(herdr.PaneRead{Revision: 0, Text: "after"}) {
+		t.Fatal("changed revision-zero snapshot was ignored")
+	}
+}
+
+func TestPaneSnapshotCursorUsesNonzeroRevision(t *testing.T) {
+	var cursor paneSnapshotCursor
+	if !cursor.changed(herdr.PaneRead{Revision: 7, Text: "before"}) {
+		t.Fatal("first versioned snapshot was ignored")
+	}
+	if cursor.changed(herdr.PaneRead{Revision: 7, Text: "after"}) {
+		t.Fatal("unchanged nonzero revision was treated as new")
+	}
+	if !cursor.changed(herdr.PaneRead{Revision: 8, Text: "after"}) {
+		t.Fatal("new nonzero revision was ignored")
+	}
+}
 
 func TestNewestValidMarkerRequiresWatcherFreshness(t *testing.T) {
 	key := bytes.Repeat([]byte{0x31}, 32)

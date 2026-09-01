@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -26,7 +27,7 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 	defer cancel()
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	var lastRevision uint64
+	var cursor paneSnapshotCursor
 	var nextLivenessCheck time.Time
 	for {
 		select {
@@ -52,10 +53,9 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 				}
 				continue
 			}
-			if read.Revision == lastRevision {
+			if !cursor.changed(read) {
 				continue
 			}
-			lastRevision = read.Revision
 			marker, ok := newestValidMarker(read.Text, key, now, startedAt)
 			if !ok {
 				continue
@@ -75,6 +75,27 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 			return errors.New("Herdr accepted the session report but did not expose the expected pane mapping")
 		}
 	}
+}
+
+type paneSnapshotCursor struct {
+	revision     uint64
+	haveRevision bool
+	digest       [sha256.Size]byte
+	haveDigest   bool
+}
+
+func (cursor *paneSnapshotCursor) changed(read herdr.PaneRead) bool {
+	if read.Revision != 0 {
+		changed := !cursor.haveRevision || read.Revision != cursor.revision
+		cursor.revision = read.Revision
+		cursor.haveRevision = true
+		return changed
+	}
+	digest := sha256.Sum256([]byte(read.Text))
+	changed := !cursor.haveDigest || digest != cursor.digest
+	cursor.digest = digest
+	cursor.haveDigest = true
+	return changed
 }
 
 func paneMappedTo(ctx context.Context, client *herdr.Client, paneID, sessionID string) bool {
