@@ -40,13 +40,17 @@ herdr-self setup codex --apply
 
 The first command is intentionally a dry run. `--apply` installs the pinned
 Herdr plugin, replaces Herdr's built-in Codex hook with the bridge hook, installs
-the small Codex skill, and creates a host-local signing key. Restart a persistent
-Codex app-server afterward so it reloads the hook registry.
+the small Codex skill, and creates a host-local signing key. Existing bridge
+upgrades keep the same hook command paths and normally require no app-server
+restart. For a first install, verify the hooks in a fresh or resumed Codex
+session. If they are absent, fully exit every connected Codex TUI before you
+restart the shared app-server outside Codex; never restart it from an active
+Codex turn.
 
 Go-equipped hosts can install the same tagged helper with:
 
 ```sh
-go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.3
+go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.4
 ```
 
 GitHub releases also contain four platform archives, SHA-256 checksums, SBOMs,
@@ -56,7 +60,7 @@ manual install:
 ```sh
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.3' \
+  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.4' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing

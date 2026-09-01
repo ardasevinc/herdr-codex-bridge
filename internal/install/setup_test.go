@@ -94,6 +94,13 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(paths.PluginConfigDir, "rendezvous-v1")); !os.IsNotExist(err) {
 		t.Fatalf("rendezvous state survived teardown: %v", err)
 	}
+	output, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), "fully exit connected Codex TUIs") || strings.Contains(string(output), "restart the centralized Codex app-server") {
+		t.Fatalf("unsafe app-server lifecycle guidance: %s", output)
+	}
 	commands, _ := os.ReadFile(logPath)
 	for _, wanted := range []string{
 		"plugin install ardasevinc/herdr-codex-bridge --ref v0.1.0 --yes",

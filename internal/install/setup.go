@@ -213,6 +213,7 @@ func SetupCodex(opts Options) (retErr error) {
 		return err
 	}
 	fmt.Fprintln(opts.Out, "setup applied; verify hooks in a fresh or resumed Codex session")
+	fmt.Fprintln(opts.Out, "if hooks are absent, fully exit connected Codex TUIs before restarting the shared app-server outside Codex")
 	return nil
 }
 
@@ -293,7 +294,7 @@ func TeardownCodex(opts Options) (retErr error) {
 	if err := os.RemoveAll(bridge.RendezvousPath(paths.Key)); err != nil {
 		return err
 	}
-	fmt.Fprintln(opts.Out, "teardown applied; restart the centralized Codex app-server")
+	fmt.Fprintln(opts.Out, "teardown applied; the shared app-server may retain removed hooks until its next safe restart")
 	return nil
 }
 
