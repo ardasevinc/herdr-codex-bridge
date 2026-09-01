@@ -1,8 +1,10 @@
 package install
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,5 +30,25 @@ func TestValidateRendezvousState(t *testing.T) {
 	}
 	if err := validateRendezvousState(root); err == nil {
 		t.Fatal("broad record permissions passed validation")
+	}
+}
+
+func TestDoctorReportIncludesBuildMetadataAndUnknownTrust(t *testing.T) {
+	report := newDoctorReport()
+	addUnknown(&report, "codex_hook_trust", "not queryable")
+	if report.BridgeVersion == "" || report.Commit == "" || report.BuildDate == "" {
+		t.Fatalf("missing build metadata: %#v", report)
+	}
+	if !report.OK || len(report.Checks) != 1 || report.Checks[0].Status != "unknown" {
+		t.Fatalf("unknown check changed doctor health: %#v", report)
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"bridge_version"`, `"commit"`, `"build_date"`} {
+		if !strings.Contains(string(data), field) {
+			t.Fatalf("doctor JSON missing %s: %s", field, data)
+		}
 	}
 }

@@ -121,7 +121,7 @@ func SetupCodex(opts Options) (retErr error) {
 	fmt.Fprintf(opts.Out, "  replace official Herdr Codex hook: %t\n", officialInstalled)
 	fmt.Fprintf(opts.Out, "  update hooks: %s\n", paths.Hooks)
 	fmt.Fprintf(opts.Out, "  install skill: %s\n", paths.Skill)
-	fmt.Fprintf(opts.Out, "  create shared key: %s\n", paths.Key)
+	fmt.Fprintf(opts.Out, "  ensure shared key: %s\n", paths.Key)
 	if !opts.Apply {
 		fmt.Fprintln(opts.Out, "dry run only; rerun with --apply to make these changes")
 		return nil

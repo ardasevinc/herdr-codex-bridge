@@ -27,8 +27,9 @@ Caller-aware Herdr CLI for Codex sessions, including centralized app-server use.
 
 Bridge commands:
   herdr-self                         Show this Codex thread's live Herdr association
-  herdr-self setup codex [--apply]  Preview or apply Codex bridge setup
-  herdr-self teardown codex [--apply]
+  herdr-self setup codex [--apply] [--force]
+                                     Preview or apply Codex bridge setup
+  herdr-self teardown codex [--apply] [--force]
                                      Preview or apply bridge removal
   herdr-self doctor [--json]        Diagnose setup without changing anything
 
@@ -211,8 +212,16 @@ func (r Runtime) runHerdr(args, env []string) error {
 }
 
 func (r Runtime) runInstall(args []string, socketPath string) error {
+	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		fmt.Fprint(r.Stdout, installHelp(args[0]))
+		return nil
+	}
 	if len(args) < 2 || args[1] != "codex" {
 		return fmt.Errorf("usage: herdr-self %s codex [--apply] [--force]", args[0])
+	}
+	if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
+		fmt.Fprint(r.Stdout, installHelp(args[0]))
+		return nil
 	}
 	binary, err := os.Executable()
 	if err != nil {
@@ -228,6 +237,22 @@ func (r Runtime) runInstall(args []string, socketPath string) error {
 		return install.SetupCodex(opts)
 	}
 	return install.TeardownCodex(opts)
+}
+
+func installHelp(command string) string {
+	action := "Install or upgrade"
+	if command == "teardown" {
+		action = "Remove"
+	}
+	return fmt.Sprintf(`Usage: herdr-self %s codex [--apply] [--force]
+
+%s the managed Herdr Codex Bridge integration.
+
+Options:
+  --apply  Apply the printed plan; without this flag the command is read-only
+  --force  Replace locally modified bridge-managed files
+  --help   Show this help
+`, command, action)
 }
 
 func (r Runtime) runHook(ctx context.Context, args []string, client *herdr.Client) error {

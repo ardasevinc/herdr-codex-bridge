@@ -101,6 +101,9 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 	if !strings.Contains(string(output), "fully exit connected Codex TUIs") || strings.Contains(string(output), "restart the centralized Codex app-server") {
 		t.Fatalf("unsafe app-server lifecycle guidance: %s", output)
 	}
+	if !strings.Contains(string(output), "ensure shared key") || strings.Contains(string(output), "create shared key") {
+		t.Fatalf("inaccurate key setup guidance: %s", output)
+	}
 	commands, _ := os.ReadFile(logPath)
 	for _, wanted := range []string{
 		"plugin install ardasevinc/herdr-codex-bridge --ref v0.1.0 --yes",

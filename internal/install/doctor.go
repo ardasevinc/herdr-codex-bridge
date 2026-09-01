@@ -16,6 +16,7 @@ import (
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/protocol"
+	"github.com/ardasevinc/herdr-codex-bridge/internal/version"
 )
 
 type Check struct {
@@ -25,8 +26,11 @@ type Check struct {
 }
 
 type DoctorReport struct {
-	OK     bool    `json:"ok"`
-	Checks []Check `json:"checks"`
+	OK            bool    `json:"ok"`
+	BridgeVersion string  `json:"bridge_version"`
+	Commit        string  `json:"commit"`
+	BuildDate     string  `json:"build_date"`
+	Checks        []Check `json:"checks"`
 }
 
 func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, out *os.File) error {
@@ -43,7 +47,7 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 			return err
 		}
 	}
-	report := DoctorReport{OK: true}
+	report := newDoctorReport()
 	add := func(name string, err error, success string) {
 		check := Check{Name: name, Status: "ok", Message: success}
 		if err != nil {
@@ -51,8 +55,8 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 		}
 		report.Checks = append(report.Checks, check)
 	}
-	warn := func(name, message string) {
-		report.Checks = append(report.Checks, Check{Name: name, Status: "warning", Message: message})
+	unknown := func(name, message string) {
+		addUnknown(&report, name, message)
 	}
 	_, err = exec.LookPath("herdr")
 	add("herdr_binary", err, "herdr is available on PATH")
@@ -89,7 +93,7 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 		}
 		add("codex_hooks", hookErr, paths.Hooks)
 		if hookErr == nil {
-			warn("codex_hook_trust", "confirm the bridge hooks are trusted in Codex /hooks; Codex exposes no stable noninteractive trust query")
+			unknown("codex_hook_trust", "Codex exposes no stable noninteractive trust query; inspect /hooks when trust changes are suspected")
 		}
 	}
 	plugins, pluginsErr := client.Plugins(ctx)
@@ -145,6 +149,16 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 		return errors.New("doctor found bridge problems")
 	}
 	return nil
+}
+
+func newDoctorReport() DoctorReport {
+	return DoctorReport{
+		OK: true, BridgeVersion: version.Effective(), Commit: version.Commit, BuildDate: version.Date,
+	}
+}
+
+func addUnknown(report *DoctorReport, name, message string) {
+	report.Checks = append(report.Checks, Check{Name: name, Status: "unknown", Message: message})
 }
 
 func validateBridgeKey(path string) error {
