@@ -39,4 +39,10 @@ func TestMarkerRejectsTamperingAndStaleness(t *testing.T) {
 	if _, err := ParseAndVerify(line, key, now.Add(MaxClockSkew+time.Millisecond)); err == nil {
 		t.Fatal("stale marker accepted")
 	}
+	if got, err := ParseAndVerifySignature(line, key); err != nil || got.SessionID != marker.SessionID {
+		t.Fatalf("stale identity signature rejected: %#v, %v", got, err)
+	}
+	if _, err := ParseAndVerifySignature(strings.Replace(line, "thread", "other", 1), key); err == nil {
+		t.Fatal("tampered identity signature accepted")
+	}
 }

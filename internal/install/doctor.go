@@ -82,6 +82,7 @@ func Doctor(ctx context.Context, jsonOutput bool, socketPath, threadID string, o
 		add("codex_skill", readErr, state.SkillPath)
 		keyErr := validateBridgeKey(paths.Key)
 		add("bridge_key", keyErr, paths.Key)
+		add("rendezvous_state", validateRendezvousState(bridge.RendezvousPath(paths.Key)), bridge.RendezvousPath(paths.Key))
 		hookData, hookErr := os.ReadFile(paths.Hooks)
 		if hookErr == nil && (!strings.Contains(string(hookData), state.SessionCommand) || !strings.Contains(string(hookData), state.PromptCommand)) {
 			hookErr = errors.New("bridge hook commands are missing or drifted")
@@ -174,6 +175,41 @@ func validateBridgeKey(path string) error {
 		return fmt.Errorf("bridge key self-test: %w", err)
 	}
 	return nil
+}
+
+func validateRendezvousState(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 {
+		return errors.New("rendezvous state must be a private 0700 directory")
+	}
+	return filepath.WalkDir(path, func(recordPath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if recordPath == path {
+			return nil
+		}
+		recordInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if recordInfo.Mode()&os.ModeSymlink != 0 || recordInfo.Mode().Perm() != 0o700 {
+				return errors.New("rendezvous lanes must be private 0700 directories")
+			}
+			return nil
+		}
+		if !recordInfo.Mode().IsRegular() || recordInfo.Mode().Perm() != 0o600 || recordInfo.Size() > 16<<10 {
+			return errors.New("rendezvous records must be small private 0600 regular files")
+		}
+		return nil
+	})
 }
 
 func minimumCommandVersion(name, minimumText string) error {

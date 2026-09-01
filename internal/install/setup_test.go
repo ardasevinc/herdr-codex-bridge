@@ -81,12 +81,18 @@ func TestSetupAndTeardownCodexInIsolatedHomes(t *testing.T) {
 		t.Fatalf("teardown with another CODEX_HOME = %v", err)
 	}
 	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.MkdirAll(filepath.Join(paths.PluginConfigDir, "rendezvous-v1", "session-test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := TeardownCodex(opts); err != nil {
 		t.Fatal(err)
 	}
 	hooks, _ = os.ReadFile(paths.Hooks)
 	if strings.Contains(string(hooks), "herdr-self") || !strings.Contains(string(hooks), "guard") {
 		t.Fatalf("unexpected teardown hooks: %s", hooks)
+	}
+	if _, err := os.Stat(filepath.Join(paths.PluginConfigDir, "rendezvous-v1")); !os.IsNotExist(err) {
+		t.Fatalf("rendezvous state survived teardown: %v", err)
 	}
 	commands, _ := os.ReadFile(logPath)
 	for _, wanted := range []string{

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ardasevinc/herdr-codex-bridge/internal/assets"
+	"github.com/ardasevinc/herdr-codex-bridge/internal/bridge"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/compat"
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
 )
@@ -139,6 +140,12 @@ func SetupCodex(opts Options) (retErr error) {
 	if err != nil {
 		return err
 	}
+	rendezvousPath := bridge.RendezvousPath(paths.Key)
+	_, rendezvousStatErr := os.Stat(rendezvousPath)
+	rendezvousExisted := rendezvousStatErr == nil
+	if rendezvousStatErr != nil && !errors.Is(rendezvousStatErr, os.ErrNotExist) {
+		return rendezvousStatErr
+	}
 	defer func() {
 		if retErr == nil {
 			return
@@ -152,6 +159,11 @@ func SetupCodex(opts Options) (retErr error) {
 		}
 		if err := restorePlugin(pluginBefore); err != nil {
 			rollbackErrs = append(rollbackErrs, err)
+		}
+		if !rendezvousExisted {
+			if err := os.RemoveAll(rendezvousPath); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
 		}
 		if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("rollback failed: %w", rollbackErr))
@@ -189,7 +201,18 @@ func SetupCodex(opts Options) (retErr error) {
 	if err := writeAtomic(paths.State, data, 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintln(opts.Out, "setup applied; restart the centralized Codex app-server so it reloads hooks")
+	key, err := os.ReadFile(paths.Key)
+	if err != nil {
+		return err
+	}
+	rendezvous, err := bridge.NewRendezvousStore(paths.Key, key)
+	if err != nil {
+		return err
+	}
+	if err := rendezvous.Sweep(time.Now().UTC()); err != nil {
+		return err
+	}
+	fmt.Fprintln(opts.Out, "setup applied; verify hooks in a fresh or resumed Codex session")
 	return nil
 }
 
@@ -212,6 +235,7 @@ func TeardownCodex(opts Options) (retErr error) {
 	fmt.Fprintln(opts.Out, "Herdr Codex Bridge teardown plan")
 	fmt.Fprintf(opts.Out, "  remove bridge hooks from: %s\n", paths.Hooks)
 	fmt.Fprintf(opts.Out, "  remove managed skill: %s\n", paths.Skill)
+	fmt.Fprintf(opts.Out, "  remove private rendezvous state: %s\n", bridge.RendezvousPath(paths.Key))
 	fmt.Fprintf(opts.Out, "  restore official Herdr Codex integration: %t\n", state.OfficialWasInstalled)
 	if !opts.Apply {
 		fmt.Fprintln(opts.Out, "dry run only; rerun with --apply to make these changes")
@@ -265,6 +289,9 @@ func TeardownCodex(opts Options) (retErr error) {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+	}
+	if err := os.RemoveAll(bridge.RendezvousPath(paths.Key)); err != nil {
+		return err
 	}
 	fmt.Fprintln(opts.Out, "teardown applied; restart the centralized Codex app-server")
 	return nil

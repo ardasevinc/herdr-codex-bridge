@@ -85,3 +85,36 @@ func TestNewestValidMarkerSkipsMalformedRecordBeforeValidMarker(t *testing.T) {
 		t.Fatalf("got %#v, %v", got, ok)
 	}
 }
+
+func TestAuthenticatedMarkerCanWitnessAfterFreshnessWindow(t *testing.T) {
+	key := bytes.Repeat([]byte{0x44}, 32)
+	issuedAt := time.Now().UTC().Add(-6 * time.Hour)
+	marker, err := protocol.New("idle-thread", "startup", issuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := marker.Sign(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := newestValidMarker(line, key, time.Now(), time.Now()); ok {
+		t.Fatal("stale marker passed mapping freshness")
+	}
+	got, ok := newestAuthenticatedMarker(line, key)
+	if !ok || got.SessionID != marker.SessionID || got.Nonce != marker.Nonce {
+		t.Fatalf("authenticated marker = %#v, %t", got, ok)
+	}
+}
+
+func TestAuthenticatedMarkerScanKeepsSeveralPaneLifecycles(t *testing.T) {
+	key := bytes.Repeat([]byte{0x45}, 32)
+	now := time.Now().UTC()
+	first, _ := protocol.New("first-thread", "startup", now.Add(-2*time.Hour))
+	second, _ := protocol.New("second-thread", "startup", now.Add(-time.Hour))
+	firstLine, _ := first.Sign(key)
+	secondLine, _ := second.Sign(key)
+	markers := authenticatedMarkers(firstLine+"\n"+secondLine, key)
+	if len(markers) != 2 || markers[0].SessionID != second.SessionID || markers[1].SessionID != first.SessionID {
+		t.Fatalf("authenticated markers = %#v", markers)
+	}
+}

@@ -56,6 +56,21 @@ func (m Marker) Sign(key []byte) (string, error) {
 }
 
 func ParseAndVerify(line string, key []byte, now time.Time) (Marker, error) {
+	marker, err := ParseAndVerifySignature(line, key)
+	if err != nil {
+		return Marker{}, err
+	}
+	age := now.Sub(marker.IssuedAt)
+	if age < -MaxClockSkew || age > MaxClockSkew {
+		return Marker{}, errors.New("stale bridge marker")
+	}
+	return marker, nil
+}
+
+// ParseAndVerifySignature authenticates marker identity without granting it
+// freshness. It is used only to create a pane-local witness claim; mapping
+// still requires ParseAndVerify on a newly emitted marker.
+func ParseAndVerifySignature(line string, key []byte) (Marker, error) {
 	start := strings.Index(line, Prefix+" ")
 	if start < 0 {
 		return Marker{}, errors.New("bridge marker not found")
@@ -102,10 +117,6 @@ func ParseAndVerify(line string, key []byte, now time.Time) (Marker, error) {
 	_, _ = mac.Write([]byte(marker.payload()))
 	if !hmac.Equal(provided, mac.Sum(nil)) {
 		return Marker{}, errors.New("invalid marker signature")
-	}
-	age := now.Sub(marker.IssuedAt)
-	if age < -MaxClockSkew || age > MaxClockSkew {
-		return Marker{}, errors.New("stale bridge marker")
 	}
 	return marker, nil
 }

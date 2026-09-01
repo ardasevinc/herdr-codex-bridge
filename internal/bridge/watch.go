@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -22,6 +23,10 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
 		return fmt.Errorf("read bridge key: %w", err)
+	}
+	store, storeErr := NewRendezvousStore(keyPath, key)
+	if storeErr == nil {
+		_ = store.Sweep(startedAt)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -58,6 +63,11 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 			}
 			marker, ok := newestValidMarker(read.Text, key, now, startedAt)
 			if !ok {
+				if storeErr == nil {
+					for _, witnessed := range authenticatedMarkers(read.Text, key) {
+						_, _ = store.Witness(witnessed, paneID, now)
+					}
+				}
 				continue
 			}
 			reportCtx, reportCancel := context.WithTimeout(ctx, time.Second)
@@ -70,6 +80,9 @@ func WatchPane(ctx context.Context, client *herdr.Client, paneID, keyPath string
 			mapped := paneMappedTo(verifyCtx, client, paneID, marker.SessionID)
 			verifyCancel()
 			if mapped {
+				if storeErr == nil {
+					_ = store.MarkMapped(marker.SessionID, store.generation(marker), now)
+				}
 				return nil
 			}
 			return errors.New("Herdr accepted the session report but did not expose the expected pane mapping")
@@ -131,7 +144,45 @@ func paneLiveState(ctx context.Context, client *herdr.Client, paneID string) (al
 }
 
 func newestValidMarker(text string, key []byte, now, startedAt time.Time) (protocol.Marker, bool) {
+	return newestMarker(text, func(record string) (protocol.Marker, error) {
+		return protocol.ParseAndVerify(record, key, now)
+	}, func(marker protocol.Marker) bool {
+		return !marker.IssuedAt.Before(startedAt.Add(-2 * time.Second))
+	})
+}
+
+func newestAuthenticatedMarker(text string, key []byte) (protocol.Marker, bool) {
+	markers := authenticatedMarkers(text, key)
+	if len(markers) == 0 {
+		return protocol.Marker{}, false
+	}
+	return markers[0], true
+}
+
+func authenticatedMarkers(text string, key []byte) []protocol.Marker {
+	markers := matchingMarkers(text, func(record string) (protocol.Marker, error) {
+		return protocol.ParseAndVerifySignature(record, key)
+	}, func(protocol.Marker) bool { return true })
+	sort.Slice(markers, func(i, j int) bool { return markers[i].IssuedAt.After(markers[j].IssuedAt) })
+	if len(markers) > 32 {
+		markers = markers[:32]
+	}
+	return markers
+}
+
+func newestMarker(text string, parse func(string) (protocol.Marker, error), accept func(protocol.Marker) bool) (protocol.Marker, bool) {
+	markers := matchingMarkers(text, parse, accept)
 	var newest protocol.Marker
+	for _, marker := range markers {
+		if newest.IssuedAt.IsZero() || marker.IssuedAt.After(newest.IssuedAt) {
+			newest = marker
+		}
+	}
+	return newest, !newest.IssuedAt.IsZero()
+}
+
+func matchingMarkers(text string, parse func(string) (protocol.Marker, error), accept func(protocol.Marker) bool) []protocol.Marker {
+	var markers []protocol.Marker
 	remaining := text
 	for {
 		start := strings.Index(remaining, protocol.Prefix)
@@ -144,20 +195,18 @@ func newestValidMarker(text string, key []byte, now, startedAt time.Time) (proto
 			break
 		}
 		record := candidate[:end+1]
-		marker, err := protocol.ParseAndVerify(compactRenderedMarker(record), key, now)
+		marker, err := parse(compactRenderedMarker(record))
 		if err != nil {
 			remaining = candidate[len(protocol.Prefix):]
 			continue
 		}
 		remaining = candidate[end+1:]
-		if marker.IssuedAt.Before(startedAt.Add(-2 * time.Second)) {
+		if !accept(marker) {
 			continue
 		}
-		if newest.IssuedAt.IsZero() || marker.IssuedAt.After(newest.IssuedAt) {
-			newest = marker
-		}
+		markers = append(markers, marker)
 	}
-	return newest, !newest.IssuedAt.IsZero()
+	return markers
 }
 
 func compactRenderedMarker(record string) string {

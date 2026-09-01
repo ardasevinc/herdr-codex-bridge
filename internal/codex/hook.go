@@ -89,6 +89,9 @@ func sessionStart(ctx context.Context, input HookInput, out io.Writer, client *h
 	if err != nil {
 		return err
 	}
+	if store, storeErr := bridge.NewRendezvousStore(keyPath, key); storeErr == nil {
+		_ = store.Arm(marker, now)
+	}
 	return json.NewEncoder(out).Encode(hookOutput{
 		SystemMessage: line,
 		HookSpecificOutput: hookSpecificOutput{
@@ -99,27 +102,100 @@ func sessionStart(ctx context.Context, input HookInput, out io.Writer, client *h
 }
 
 func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, client *herdr.Client, keyPath string, now time.Time) error {
-	deadline := time.Now().Add(750 * time.Millisecond)
+	_, resolveErr := bridge.Resolve(ctx, client, input.SessionID)
+	if resolveErr == nil {
+		markMappedState(keyPath, input.SessionID, now)
+		return nil
+	}
+	if errors.Is(resolveErr, bridge.ErrAmbiguous) {
+		return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil
+	}
+	store, err := bridge.NewRendezvousStore(keyPath, key)
+	if err != nil {
+		return nil
+	}
+	_ = store.Sweep(now)
+	deadline := time.Time{}
 	for {
-		_, err := bridge.Resolve(ctx, client, input.SessionID)
-		if err == nil {
-			return nil
+		claims, claimErr := store.Claims(input.SessionID, now)
+		if claimErr == nil && len(claims) > 0 {
+			_, resolveErr = bridge.Resolve(ctx, client, input.SessionID)
+			if resolveErr == nil {
+				_ = store.MarkMapped(input.SessionID, "", now)
+				return nil
+			}
+			if errors.Is(resolveErr, bridge.ErrAmbiguous) {
+				return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
+			}
+			liveClaims, liveErr := liveWitnessClaims(ctx, client, claims)
+			if liveErr != nil {
+				return nil
+			}
+			if len(liveClaims) > 1 {
+				notice, noticeErr := store.ClaimAmbiguityNotice(input.SessionID, liveClaims[0].Generation, now)
+				if noticeErr != nil || !notice {
+					return nil
+				}
+				return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple panes claiming this Codex thread. It will not emit a recovery marker or permit caller-relative mutations until the duplicate claim is resolved.")
+			}
+			if len(liveClaims) == 1 {
+				won, gateErr := store.ClaimEmission(input.SessionID, liveClaims[0].Generation, now)
+				if gateErr != nil || !won {
+					return nil
+				}
+				return writePendingMarker(out, "UserPromptSubmit", input.SessionID, recoverySessionStartSource, pendingContext(input.SessionID), key, now)
+			}
 		}
-		if errors.Is(err, bridge.ErrAmbiguous) {
-			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")
+		if deadline.IsZero() {
+			shouldWait, waitErr := store.BeginWait(input.SessionID, now)
+			if waitErr != nil || !shouldWait {
+				return nil
+			}
+			deadline = time.Now().Add(750 * time.Millisecond)
 		}
 		if time.Now().After(deadline) {
-			return writePendingMarker(out, "UserPromptSubmit", input.SessionID, recoverySessionStartSource, pendingContext(input.SessionID), keyPath, now)
+			_ = store.MarkAbandoned(input.SessionID, now)
+			return nil
 		}
 		time.Sleep(75 * time.Millisecond)
 	}
 }
 
-func writePendingMarker(out io.Writer, event, sessionID, source, context, keyPath string, now time.Time) error {
+func markMappedState(keyPath, sessionID string, now time.Time) {
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
-		return fmt.Errorf("read bridge key: %w", err)
+		return
 	}
+	store, err := bridge.NewRendezvousStore(keyPath, key)
+	if err != nil {
+		return
+	}
+	_ = store.Sweep(now)
+	_ = store.MarkMapped(sessionID, "", now)
+}
+
+func liveWitnessClaims(ctx context.Context, client *herdr.Client, claims []bridge.WitnessClaim) ([]bridge.WitnessClaim, error) {
+	panes, err := client.Panes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	live := make([]bridge.WitnessClaim, 0, len(claims))
+	for _, claim := range claims {
+		for _, pane := range panes {
+			if pane.PaneID == claim.PaneID && pane.Agent == "codex" {
+				live = append(live, claim)
+				break
+			}
+		}
+	}
+	return live, nil
+}
+
+func writePendingMarker(out io.Writer, event, sessionID, source, context string, key []byte, now time.Time) error {
 	marker, err := protocol.New(sessionID, source, now)
 	if err != nil {
 		return err
@@ -129,8 +205,7 @@ func writePendingMarker(out io.Writer, event, sessionID, source, context, keyPat
 		return err
 	}
 	return json.NewEncoder(out).Encode(hookOutput{
-		SystemMessage:  line,
-		SuppressOutput: true,
+		SystemMessage: line,
 		HookSpecificOutput: hookSpecificOutput{
 			HookEventName: event, AdditionalContext: context,
 		},
