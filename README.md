@@ -44,7 +44,7 @@ Codex app-server afterward so it reloads the hook registry.
 Go-equipped hosts can install the same tagged helper with:
 
 ```sh
-go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.0
+go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.1
 ```
 
 GitHub releases also contain four platform archives, SHA-256 checksums, SBOMs,
@@ -54,7 +54,7 @@ manual install:
 ```sh
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.0' \
+  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.1' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
@@ -79,6 +79,9 @@ Codex integration if setup found it installed.
 - Codex hook trust is not bypassed. Codex may ask you to approve changed hooks.
   `herdr-self doctor` reminds you to confirm trust in `/hooks`, because Codex
   does not expose a stable noninteractive trust query.
+- The prompt hook emits no output after association. While a thread is still
+  unmapped, it may emit a visible signed recovery marker so the pane-side
+  watcher can finish the rendezvous.
 
 `herdr-self --skill` prints the bridge overlay followed by Herdr's live upstream
 skill. `herdr-self --help` clearly delimits bridge help from upstream Herdr help.

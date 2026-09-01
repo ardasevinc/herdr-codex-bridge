@@ -1,6 +1,6 @@
 id = "herdr-codex-bridge"
 name = "Herdr Codex Bridge"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.8.2"
 description = "Restores native Herdr pane identity to Codex sessions using a centralized app-server"
 platforms = ["linux", "macos"]

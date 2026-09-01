@@ -1,13 +1,13 @@
 package bridge
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ardasevinc/herdr-codex-bridge/internal/herdr"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/protocol"
@@ -111,14 +111,25 @@ func paneLiveState(ctx context.Context, client *herdr.Client, paneID string) (al
 
 func newestValidMarker(text string, key []byte, now, startedAt time.Time) (protocol.Marker, bool) {
 	var newest protocol.Marker
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.Contains(line, protocol.Prefix) {
+	remaining := text
+	for {
+		start := strings.Index(remaining, protocol.Prefix)
+		if start < 0 {
+			break
+		}
+		candidate := remaining[start:]
+		end := strings.IndexByte(candidate, ']')
+		if end < 0 {
+			break
+		}
+		record := candidate[:end+1]
+		marker, err := protocol.ParseAndVerify(compactRenderedMarker(record), key, now)
+		if err != nil {
+			remaining = candidate[len(protocol.Prefix):]
 			continue
 		}
-		marker, err := protocol.ParseAndVerify(line, key, now)
-		if err != nil || marker.IssuedAt.Before(startedAt.Add(-2*time.Second)) {
+		remaining = candidate[end+1:]
+		if marker.IssuedAt.Before(startedAt.Add(-2 * time.Second)) {
 			continue
 		}
 		if newest.IssuedAt.IsZero() || marker.IssuedAt.After(newest.IssuedAt) {
@@ -126,4 +137,19 @@ func newestValidMarker(text string, key []byte, now, startedAt time.Time) (proto
 		}
 	}
 	return newest, !newest.IssuedAt.IsZero()
+}
+
+func compactRenderedMarker(record string) string {
+	var compact strings.Builder
+	compact.Grow(len(record))
+	for _, char := range record {
+		if !unicode.IsSpace(char) {
+			compact.WriteRune(char)
+		}
+	}
+	normalized := compact.String()
+	for _, field := range []string{"session=", "source=", "issued_at=", "nonce=", "sig="} {
+		normalized = strings.Replace(normalized, field, " "+field, 1)
+	}
+	return normalized
 }

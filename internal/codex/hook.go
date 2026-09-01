@@ -101,9 +101,9 @@ func sessionStart(ctx context.Context, input HookInput, out io.Writer, client *h
 func userPromptSubmit(ctx context.Context, input HookInput, out io.Writer, client *herdr.Client, keyPath string, now time.Time) error {
 	deadline := time.Now().Add(750 * time.Millisecond)
 	for {
-		association, err := bridge.Resolve(ctx, client, input.SessionID)
+		_, err := bridge.Resolve(ctx, client, input.SessionID)
 		if err == nil {
-			return writeContext(out, "UserPromptSubmit", associationContext(association))
+			return nil
 		}
 		if errors.Is(err, bridge.ErrAmbiguous) {
 			return writeContext(out, "UserPromptSubmit", "Herdr bridge found multiple live panes for this Codex thread. herdr-self refuses mutations until the duplicate mapping is resolved, but still permits its documented read-only commands. If an explicit mutation is necessary, call upstream herdr directly with a fully specified target.")

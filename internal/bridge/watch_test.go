@@ -21,3 +21,40 @@ func TestNewestValidMarkerRequiresWatcherFreshness(t *testing.T) {
 		t.Fatalf("got %#v, %v", got, ok)
 	}
 }
+
+func TestNewestValidMarkerAcceptsTUIHardWrappedRecord(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, 32)
+	started := time.Unix(1_788_245_300, 0).UTC()
+	marker, err := protocol.New("01a05ba6-5535-77e1-a1c8-e2ccf3750bcd", "clear", started.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := marker.Sign(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := line[:80] + "\n" + line[80:141] + "\n" + line[141:]
+
+	got, ok := newestValidMarker(wrapped, key, started.Add(2*time.Second), started)
+	if !ok || got.SessionID != marker.SessionID || got.Source != marker.Source {
+		t.Fatalf("got %#v, %v", got, ok)
+	}
+}
+
+func TestNewestValidMarkerSkipsMalformedRecordBeforeValidMarker(t *testing.T) {
+	key := bytes.Repeat([]byte{0x43}, 32)
+	started := time.Unix(1_788_245_400, 0).UTC()
+	marker, err := protocol.New("valid-thread", "startup", started.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := marker.Sign(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := newestValidMarker(protocol.Prefix+" malformed "+line, key, started.Add(2*time.Second), started)
+	if !ok || got.SessionID != marker.SessionID {
+		t.Fatalf("got %#v, %v", got, ok)
+	}
+}

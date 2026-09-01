@@ -1,9 +1,12 @@
 package codex
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,5 +89,46 @@ func TestUserPromptReissuesFreshMarkerWhenThreadIsUnmapped(t *testing.T) {
 	}
 	if marker.SessionID != "new-thread" || marker.Source != "clear" || !got.SuppressOutput {
 		t.Fatalf("unexpected recovery output: marker=%#v output=%#v", marker, got)
+	}
+}
+
+func TestUserPromptIsQuietWhenThreadIsMapped(t *testing.T) {
+	t.Setenv("HERDR_ENV", "")
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("hcb-hook-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	})
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		var request struct {
+			ID string `json:"id"`
+		}
+		_ = json.NewDecoder(bufio.NewReader(connection)).Decode(&request)
+		_ = json.NewEncoder(connection).Encode(map[string]any{
+			"id": request.ID,
+			"result": map[string]any{"agents": []map[string]any{{
+				"agent": "codex", "workspace_id": "w1", "tab_id": "w1:t1", "pane_id": "w1:p1",
+				"agent_session": map[string]any{"source": "herdr:codex", "agent": "codex", "kind": "id", "value": "mapped-thread"},
+			}}},
+		})
+	}()
+
+	var output bytes.Buffer
+	input := `{"session_id":"mapped-thread","hook_event_name":"UserPromptSubmit"}`
+	err = RunHook(context.Background(), "user-prompt-submit", strings.NewReader(input), &output, &herdr.Client{SocketPath: socketPath}, "/unused", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("mapped prompt hook emitted output: %q", output.String())
 	}
 }
