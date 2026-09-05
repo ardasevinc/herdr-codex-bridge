@@ -78,12 +78,13 @@ homebrew_casks:
     license: Apache-2.0
     binaries:
       - herdr-self
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/herdr-self"]
-          end
+    # GoReleaser's lifecycle hooks emit deprecated Ruby flight blocks.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "herdr-self"], chdir: "."
+        end
+      end
     ids:
       - default
 
