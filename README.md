@@ -50,7 +50,7 @@ Codex turn.
 Go-equipped hosts can install the same tagged helper with:
 
 ```sh
-go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.6
+go install github.com/ardasevinc/herdr-codex-bridge/cmd/herdr-self@v0.1.7
 ```
 
 GitHub releases also contain four platform archives, SHA-256 checksums, SBOMs,
@@ -60,7 +60,7 @@ manual install:
 ```sh
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.6' \
+  --certificate-identity 'https://github.com/ardasevinc/herdr-codex-bridge/.github/workflows/release.yml@refs/tags/v0.1.7' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
