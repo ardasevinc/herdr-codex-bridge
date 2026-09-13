@@ -36,6 +36,7 @@ archives:
       - NOTICE
       - README.md
       - herdr-plugin.toml
+      - docs/codex-prompts/herdr-rebind.md
 
 checksum:
   name_template: checksums.txt
