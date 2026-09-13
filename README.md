@@ -121,6 +121,47 @@ recovery remains deferred until Herdr exposes authoritative pane-occupant
 identity suitable for an atomic report. Use Herdr's managed resume path when
 possible instead of inferring identity from pane ID, cwd, argv, or timing.
 
+### Manual break-glass reassociation
+
+An operator who can see the exact target pane may submit this reserved prompt
+in the Codex TUI whose current thread should own it:
+
+```text
+herdr-rebind --pane w3:p17
+herdr-rebind --pane w3:p17 --replace --apply
+```
+
+The first form is a read-only preview. `--apply` makes one direct Herdr session
+report using the current `UserPromptSubmit` payload's thread ID, then verifies
+the target and global uniqueness. A different existing target mapping requires
+`--replace`. Every recognized form blocks model execution, including malformed
+or failed requests.
+
+This is an explicitly non-atomic operator override, not automatic identity
+proof. Invoke it only while personally verifying the pane and TUI. Concurrent
+occupant replacement or competing writers can invalidate its prechecks and
+verification. Never ask an agent to choose the target, invoke it autonomously,
+retry an uncertain result, or roll it back. Every client attached to the thread
+shares the resulting Herdr association.
+
+Codex still documents deprecated custom prompts, but support differs across
+builds. The matching tagged source contains
+[`docs/codex-prompts/herdr-rebind.md`](docs/codex-prompts/herdr-rebind.md) as an
+optional frontend for compatible clients. From that source checkout, install it
+manually:
+
+```sh
+mkdir -p ~/.codex/prompts
+cp docs/codex-prompts/herdr-rebind.md ~/.codex/prompts/herdr-rebind.md
+```
+
+After starting a new Codex session, preview with
+`/prompts:herdr-rebind w3:p17`, then apply with
+`/prompts:herdr-rebind w3:p17 --replace --apply`. If the command is unavailable,
+submit the reserved plain-text form above. The bridge does not claim custom
+prompt support for Codex `0.154.0`, whose implementation currently disagrees
+with the published deprecated-feature documentation.
+
 ## Development
 
 ```sh

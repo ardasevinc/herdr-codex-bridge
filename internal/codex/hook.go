@@ -25,11 +25,16 @@ type HookInput struct {
 	SessionID     string `json:"session_id"`
 	HookEventName string `json:"hook_event_name"`
 	Source        string `json:"source"`
+	Prompt        string `json:"prompt"`
+	AgentID       string `json:"agent_id"`
+	AgentType     string `json:"agent_type"`
 }
 
 type hookOutput struct {
 	SystemMessage      string             `json:"systemMessage,omitempty"`
 	SuppressOutput     bool               `json:"suppressOutput,omitempty"`
+	Decision           string             `json:"decision,omitempty"`
+	Reason             string             `json:"reason,omitempty"`
 	HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
 }
 
@@ -41,7 +46,19 @@ type hookSpecificOutput struct {
 func RunHook(ctx context.Context, action string, in io.Reader, out io.Writer, client *herdr.Client, keyPath string, now time.Time) error {
 	var input HookInput
 	if err := json.NewDecoder(io.LimitReader(in, 1<<20)).Decode(&input); err != nil {
+		if action == "user-prompt-submit" {
+			return writeBlocked(out, "Herdr rejected malformed UserPromptSubmit input before executing any reserved command")
+		}
 		return fmt.Errorf("decode hook input: %w", err)
+	}
+	if action == "user-prompt-submit" {
+		request, recognized, parseErr := parseManualRebind(input.Prompt)
+		if recognized {
+			if parseErr != nil {
+				return writeBlocked(out, "Herdr manual rebind rejected: "+parseErr.Error())
+			}
+			return manualRebind(ctx, input, request, out, client, now)
+		}
 	}
 	if input.SessionID == "" {
 		input.SessionID = os.Getenv("CODEX_THREAD_ID")
@@ -216,6 +233,16 @@ func writeContext(out io.Writer, event, additionalContext string) error {
 	return json.NewEncoder(out).Encode(hookOutput{
 		SuppressOutput:     true,
 		HookSpecificOutput: hookSpecificOutput{HookEventName: event, AdditionalContext: additionalContext},
+	})
+}
+
+func writeBlocked(out io.Writer, reason string) error {
+	return json.NewEncoder(out).Encode(hookOutput{
+		Decision: "block",
+		Reason:   reason,
+		HookSpecificOutput: hookSpecificOutput{
+			HookEventName: "UserPromptSubmit",
+		},
 	})
 }
 

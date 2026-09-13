@@ -31,6 +31,16 @@ type response struct {
 	} `json:"error"`
 }
 
+type RPCError struct {
+	Method  string
+	Code    string
+	Message string
+}
+
+func (e *RPCError) Error() string {
+	return fmt.Sprintf("Herdr %s: %s", e.Code, e.Message)
+}
+
 type AgentSession struct {
 	Source string `json:"source"`
 	Agent  string `json:"agent"`
@@ -96,7 +106,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		return fmt.Errorf("read Herdr response: %w", err)
 	}
 	if envelope.Error != nil {
-		return fmt.Errorf("Herdr %s: %s", envelope.Error.Code, envelope.Error.Message)
+		return &RPCError{Method: method, Code: envelope.Error.Code, Message: envelope.Error.Message}
 	}
 	if result != nil && len(envelope.Result) > 0 {
 		if err := json.Unmarshal(envelope.Result, result); err != nil {
