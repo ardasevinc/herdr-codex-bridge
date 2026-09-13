@@ -73,6 +73,9 @@ func TestBridgeHelpDocumentsEnforcedSafeCommands(t *testing.T) {
 	for _, wanted := range []string{
 		"herdr-self --json",
 		"herdr-self doctor --json",
+		"herdr-self docs agents",
+		"herdr-self docs commands --json",
+		"herdr-self rebind --help",
 		"specifically reports an unmapped or ambiguous thread",
 		"delegated without caller context",
 		"All other delegated operations fail closed",

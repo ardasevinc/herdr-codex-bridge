@@ -23,6 +23,10 @@ func DefaultSocket() (string, error) {
 	if value := os.Getenv("HERDR_SOCKET_PATH"); value != "" {
 		return value, nil
 	}
+	return CanonicalSocket()
+}
+
+func CanonicalSocket() (string, error) {
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
 		home, err := os.UserHomeDir()

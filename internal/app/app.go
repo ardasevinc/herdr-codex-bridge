@@ -29,6 +29,10 @@ const (
 
 Caller-aware Herdr CLI for Codex sessions, including centralized app-server use.
 
+Agents:           herdr-self docs agents
+Command contract: herdr-self docs commands --json
+Reassociation:    herdr-self rebind --help
+
 Bridge commands:
   herdr-self                         Show this Codex thread's live Herdr association
   herdr-self setup codex [--apply] [--force]
@@ -36,6 +40,8 @@ Bridge commands:
   herdr-self teardown codex [--apply] [--force]
                                      Preview or apply bridge removal
   herdr-self doctor [--json]        Diagnose setup without changing anything
+  herdr-self rebind --pane ID [--replace] [--apply]
+                                     Preview or apply explicit pane reassociation
 
 Bridge flags:
   --bridge-help  Show only this bridge help
@@ -100,12 +106,27 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 	if r.Now == nil {
 		r.Now = time.Now
 	}
+	socketSpecified := contains(args, "--socket")
 	socketPath, args, err := takeOption(args, "--socket")
 	if err != nil {
 		return err
 	}
+	if len(args) > 0 && args[0] == "docs" {
+		if socketSpecified {
+			return errors.New("docs is offline and does not accept --socket")
+		}
+		return r.runDocs(args[1:])
+	}
+	if len(args) == 2 && args[0] == "rebind" && (args[1] == "--help" || args[1] == "-h") {
+		fmt.Fprint(r.Stdout, rebindHelp())
+		return nil
+	}
 	if socketPath == "" {
-		socketPath, err = bridgeconfig.DefaultSocket()
+		if len(args) > 0 && args[0] == "rebind" {
+			socketPath, err = bridgeconfig.CanonicalSocket()
+		} else {
+			socketPath, err = bridgeconfig.DefaultSocket()
+		}
 		if err != nil {
 			return err
 		}
@@ -159,6 +180,8 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 		}
 		jsonOutput := contains(args[1:], "--json")
 		return install.Doctor(ctx, jsonOutput, socketPath, envValue(r.Environ, "CODEX_THREAD_ID"), outputFile(r.Stdout))
+	case "rebind":
+		return r.runRebind(ctx, args[1:], client)
 	case "_hook":
 		return r.runHook(ctx, args[1:], client)
 	case "_watch":
@@ -166,6 +189,39 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 	default:
 		return r.delegate(ctx, client, args, socketPath)
 	}
+}
+
+func (r Runtime) runRebind(ctx context.Context, args []string, client *herdr.Client) error {
+	request, err := codex.ParseManualRebindArgs(args)
+	if err != nil {
+		return fmt.Errorf("invalid rebind command: %w", err)
+	}
+	threadID := envValue(r.Environ, "CODEX_THREAD_ID")
+	if threadID == "" {
+		return errors.New("CODEX_THREAD_ID is unset; rebind must run from the Codex thread being associated")
+	}
+	outcome := codex.RunManualRebind(ctx, threadID, request, client, r.Now())
+	if !outcome.Successful() {
+		return errors.New(outcome.Message)
+	}
+	fmt.Fprintln(r.Stdout, outcome.Message)
+	return nil
+}
+
+func rebindHelp() string {
+	return `Usage: herdr-self rebind --pane ID [--replace] [--apply]
+
+Preview or apply an explicit, non-atomic pane reassociation for the calling
+Codex thread. The command uses CODEX_THREAD_ID and never accepts a thread ID.
+It repairs an unmapped thread and cannot move a thread already mapped elsewhere
+or override duplicate mappings.
+
+Options:
+  --pane ID  Fully qualified live Herdr pane containing Codex
+  --replace  Acknowledge replacement of a different existing mapping
+  --apply    Send one report and verify it; without this flag, preview only
+  --help     Show this help
+`
 }
 
 func (r Runtime) printSelf(ctx context.Context, client *herdr.Client, jsonOutput bool) error {

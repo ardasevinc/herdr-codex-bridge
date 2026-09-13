@@ -22,12 +22,12 @@ func TestParseManualRebind(t *testing.T) {
 		name       string
 		prompt     string
 		recognized bool
-		want       manualRebindRequest
+		want       ManualRebindRequest
 		wantErr    string
 	}{
 		{name: "ordinary prompt", prompt: "please run herdr-rebind", recognized: false},
-		{name: "preview", prompt: "herdr-rebind --pane w3:p17", recognized: true, want: manualRebindRequest{PaneID: "w3:p17"}},
-		{name: "apply replacement", prompt: " herdr-rebind --apply --pane w3:p17 --replace ", recognized: true, want: manualRebindRequest{PaneID: "w3:p17", Replace: true, Apply: true}},
+		{name: "preview", prompt: "herdr-rebind --pane w3:p17", recognized: true, want: ManualRebindRequest{PaneID: "w3:p17"}},
+		{name: "apply replacement", prompt: " herdr-rebind --apply --pane w3:p17 --replace ", recognized: true, want: ManualRebindRequest{PaneID: "w3:p17", Replace: true, Apply: true}},
 		{name: "missing pane", prompt: "herdr-rebind --apply", recognized: true, wantErr: "--pane requires"},
 		{name: "relative pane", prompt: "herdr-rebind --pane p17", recognized: true, wantErr: "fully qualified"},
 		{name: "unknown argument", prompt: "herdr-rebind --pane w3:p17 --force", recognized: true, wantErr: "unknown argument"},

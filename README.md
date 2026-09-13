@@ -70,6 +70,18 @@ Run `herdr-self doctor` to verify the installation. To remove it, preview and
 then apply `herdr-self teardown codex`; teardown restores the official Herdr
 Codex integration if setup found it installed.
 
+The installed binary carries version-matched operating documentation:
+
+```sh
+herdr-self docs
+herdr-self docs agents
+herdr-self docs commands --json
+```
+
+These commands are offline and require no Codex identity, Herdr socket, plugin
+state, or network access. Combined bridge and upstream help remains available at
+`herdr-self --help`.
+
 ## Safety model
 
 - The Herdr plugin observes only live pane output after Codex is detected.
@@ -121,28 +133,43 @@ recovery remains deferred until Herdr exposes authoritative pane-occupant
 identity suitable for an atomic report. Use Herdr's managed resume path when
 possible instead of inferring identity from pane ID, cwd, argv, or timing.
 
-### Manual break-glass reassociation
+### Break-glass reassociation
 
-An operator who can see the exact target pane may submit this reserved prompt
-in the Codex TUI whose current thread should own it:
+An agent or operator with specific live evidence for the exact target pane can
+use the bridge-owned CLI even while caller association is missing:
+
+```sh
+herdr-self rebind --pane w3:p17
+herdr-self rebind --pane w3:p17 --replace --apply
+```
+
+The command reads only `CODEX_THREAD_ID` from the invoking Codex tool process;
+it does not accept an arbitrary thread ID or trust inherited `HERDR_*` identity.
+The first form is a read-only preview. `--apply` makes one direct Herdr session
+report and verifies the target plus global uniqueness. A different existing
+target mapping requires `--replace`.
+
+This repairs an unmapped thread whose intended pane is known. It does not move
+a thread already mapped on another pane or override duplicate mappings.
+
+This is an explicitly non-atomic judgment call, not automatic identity proof.
+Agents may invoke it when live Herdr evidence makes the target unambiguous, but
+must preview first. Never choose a pane from cwd, argv, title, focus, or timing
+alone. Concurrent occupant replacement or competing writers can invalidate the
+prechecks and verification; never retry or roll back an uncertain result.
+`--replace` acknowledges a different mapping, not proof that its occupant is
+stale. Every client attached to the thread shares the resulting association.
+
+The same engine is available as a reserved prompt for direct operator use:
 
 ```text
 herdr-rebind --pane w3:p17
 herdr-rebind --pane w3:p17 --replace --apply
 ```
 
-The first form is a read-only preview. `--apply` makes one direct Herdr session
-report using the current `UserPromptSubmit` payload's thread ID, then verifies
-the target and global uniqueness. A different existing target mapping requires
-`--replace`. Every recognized form blocks model execution, including malformed
-or failed requests.
-
-This is an explicitly non-atomic operator override, not automatic identity
-proof. Invoke it only while personally verifying the pane and TUI. Concurrent
-occupant replacement or competing writers can invalidate its prechecks and
-verification. Never ask an agent to choose the target, invoke it autonomously,
-retry an uncertain result, or roll it back. Every client attached to the thread
-shares the resulting Herdr association.
+`UserPromptSubmit` supplies the current thread ID and blocks every recognized
+form before model execution. The prompt path rejects subagent-originated
+requests; agents should use `herdr-self rebind` through their normal CLI tool.
 
 Codex still documents deprecated custom prompts, but support differs across
 builds. Release archives and the matching tagged source contain
@@ -158,7 +185,7 @@ cp docs/codex-prompts/herdr-rebind.md ~/.codex/prompts/herdr-rebind.md
 After starting a new Codex session, preview with
 `/prompts:herdr-rebind w3:p17`, then apply with
 `/prompts:herdr-rebind w3:p17 --replace --apply`. If the command is unavailable,
-submit the reserved plain-text form above. The bridge does not claim custom
+submit the reserved plain-text form above or use the bridge CLI. The bridge does not claim custom
 prompt support for Codex `0.154.0`, whose implementation currently disagrees
 with the published deprecated-feature documentation.
 
