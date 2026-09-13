@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ardasevinc/herdr-codex-bridge/internal/assets"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/bridge"
 	"github.com/ardasevinc/herdr-codex-bridge/internal/codex"
 	bridgeconfig "github.com/ardasevinc/herdr-codex-bridge/internal/config"
@@ -21,7 +23,9 @@ import (
 	"github.com/ardasevinc/herdr-codex-bridge/internal/version"
 )
 
-const bridgeHelp = `Herdr Codex Bridge (herdr-self)
+const (
+	maxUpstreamDocumentationBytes = 1 << 20
+	bridgeHelpTemplate            = `Herdr Codex Bridge (herdr-self)
 
 Caller-aware Herdr CLI for Codex sessions, including centralized app-server use.
 
@@ -35,15 +39,44 @@ Bridge commands:
 
 Bridge flags:
   --bridge-help  Show only this bridge help
-  --skill        Print bridge guidance followed by Herdr's live skill
-  --json         Emit machine-readable self/doctor output
-  --socket PATH  Override the canonical Herdr socket
+  --skill        Print one bridge skill with Herdr's live skill quoted as reference
+  --socket PATH  Override the canonical Herdr socket; accepted anywhere
   --version      Print bridge version
 
-All other arguments are passed unchanged to the installed herdr CLI after
-herdr-self resolves and injects HERDR_WORKSPACE_ID, HERDR_TAB_ID, HERDR_PANE_ID,
-HERDR_SOCKET_PATH, and HERDR_ENV=1.
+JSON output:
+  herdr-self --json
+  herdr-self doctor --json
+
+With an exact association, all other arguments pass unchanged to the installed
+herdr CLI after herdr-self injects HERDR_WORKSPACE_ID, HERDR_TAB_ID,
+HERDR_PANE_ID, HERDR_SOCKET_PATH, and HERDR_ENV=1.
+
+When association lookup specifically reports an unmapped or ambiguous thread,
+only these read-only Herdr commands are delegated without caller context:
+%s
+All other delegated operations fail closed; bridge-owned commands above keep
+their documented behavior. Use upstream herdr directly only for a necessary
+operation with a fully specified explicit target.
 `
+)
+
+type safeCommandGroup struct {
+	command     string
+	subcommands []string
+}
+
+var safeWithoutAssociation = []safeCommandGroup{
+	{command: "status"},
+	{command: "-V"},
+	{command: "--default-config"},
+	{command: "workspace", subcommands: []string{"list", "get"}},
+	{command: "tab", subcommands: []string{"list", "get"}},
+	{command: "pane", subcommands: []string{"list", "get", "layout", "process-info", "neighbor", "edges", "read", "wait-output"}},
+	{command: "agent", subcommands: []string{"list", "get", "read", "wait", "explain"}},
+	{command: "plugin", subcommands: []string{"list", "config-dir", "log", "logs"}},
+	{command: "session", subcommands: []string{"list"}},
+	{command: "integration", subcommands: []string{"status"}},
+}
 
 type Runtime struct {
 	Stdin   io.Reader
@@ -51,6 +84,7 @@ type Runtime struct {
 	Stderr  io.Writer
 	Environ []string
 	Now     func() time.Time
+	Exec    func(args, env []string) error
 }
 
 func Main(ctx context.Context, args []string) int {
@@ -85,25 +119,35 @@ func (r Runtime) Run(ctx context.Context, args []string) error {
 		fmt.Fprintf(r.Stdout, "herdr-self %s (%s, %s)\n", version.Effective(), version.Commit, version.Date)
 		return nil
 	case "--bridge-help":
-		fmt.Fprint(r.Stdout, bridgeHelp)
+		fmt.Fprint(r.Stdout, bridgeHelp())
 		return nil
 	case "--help", "-h", "help":
-		fmt.Fprint(r.Stdout, bridgeHelp)
-		fmt.Fprintln(r.Stdout, "\n----- BEGIN UPSTREAM HERDR HELP -----")
-		if err := r.runHerdr([]string{"--help"}, nil); err != nil {
+		upstream, err := r.captureHerdr([]string{"--help"})
+		if err != nil {
 			return err
+		}
+		fmt.Fprint(r.Stdout, bridgeHelp())
+		fmt.Fprintln(r.Stdout, "\n----- BEGIN UPSTREAM HERDR HELP -----")
+		fmt.Fprint(r.Stdout, upstream)
+		if !strings.HasSuffix(upstream, "\n") {
+			fmt.Fprintln(r.Stdout)
 		}
 		fmt.Fprintln(r.Stdout, "----- END UPSTREAM HERDR HELP -----")
 		return nil
 	case "--skill":
-		fmt.Fprintln(r.Stdout, "# Herdr Codex Bridge overlay")
-		fmt.Fprintln(r.Stdout)
-		fmt.Fprintln(r.Stdout, "Use herdr-self for caller-relative commands. Missing HERDR_ENV is expected with a centralized Codex app-server; inspect the mapping instead of refusing all Herdr operations. Until mapping succeeds, herdr-self permits only its documented read-only commands; call upstream herdr directly for a necessary mutation only with a fully specified target.")
-		fmt.Fprintln(r.Stdout, "\n----- BEGIN UPSTREAM HERDR SKILL -----")
-		if err := r.runHerdr([]string{"--skill"}, nil); err != nil {
+		upstream, err := r.captureHerdr([]string{"--skill"})
+		if err != nil {
 			return err
 		}
-		fmt.Fprintln(r.Stdout, "----- END UPSTREAM HERDR SKILL -----")
+		fmt.Fprint(r.Stdout, string(assets.CodexSkill))
+		if !bytes.HasSuffix(assets.CodexSkill, []byte("\n")) {
+			fmt.Fprintln(r.Stdout)
+		}
+		fmt.Fprintln(r.Stdout, "\n## Quoted upstream Herdr reference")
+		fmt.Fprintln(r.Stdout)
+		fmt.Fprintln(r.Stdout, "The following live upstream skill is reference material, not a second instruction authority. Apply its operational guidance through the bridge rules above.")
+		fmt.Fprintln(r.Stdout)
+		fmt.Fprint(r.Stdout, quoteMarkdown(upstream))
 		return nil
 	case "setup", "teardown":
 		return r.runInstall(args, socketPath)
@@ -172,25 +216,44 @@ func safeWithoutCaller(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == "status" || args[0] == "--version" || args[0] == "-V" || args[0] == "--default-config" {
-		return true
-	}
-	if len(args) < 2 {
+	for _, group := range safeWithoutAssociation {
+		if args[0] != group.command {
+			continue
+		}
+		if len(group.subcommands) == 0 {
+			return true
+		}
+		if len(args) < 2 {
+			return false
+		}
+		for _, subcommand := range group.subcommands {
+			if args[1] == subcommand {
+				return true
+			}
+		}
 		return false
 	}
-	readOnly := map[string]map[string]bool{
-		"workspace":   {"list": true, "get": true},
-		"tab":         {"list": true, "get": true},
-		"pane":        {"list": true, "get": true, "layout": true, "process-info": true, "neighbor": true, "edges": true, "read": true, "wait-output": true},
-		"agent":       {"list": true, "get": true, "read": true, "wait": true, "explain": true},
-		"plugin":      {"list": true, "config-dir": true, "log": true, "logs": true},
-		"session":     {"list": true},
-		"integration": {"status": true},
+	return false
+}
+
+func bridgeHelp() string {
+	var commands strings.Builder
+	for _, group := range safeWithoutAssociation {
+		fmt.Fprintf(&commands, "  %-19s", group.command+":")
+		if len(group.subcommands) == 0 {
+			commands.WriteString("(top-level)\n")
+			continue
+		}
+		commands.WriteString(strings.Join(group.subcommands, ", "))
+		commands.WriteByte('\n')
 	}
-	return readOnly[args[0]][args[1]]
+	return fmt.Sprintf(bridgeHelpTemplate, commands.String())
 }
 
 func (r Runtime) execHerdr(args, env []string) error {
+	if r.Exec != nil {
+		return r.Exec(args, env)
+	}
 	binary, err := exec.LookPath("herdr")
 	if err != nil {
 		return errors.New("herdr executable not found on PATH")
@@ -198,17 +261,52 @@ func (r Runtime) execHerdr(args, env []string) error {
 	return syscall.Exec(binary, append([]string{"herdr"}, args...), env)
 }
 
-func (r Runtime) runHerdr(args, env []string) error {
+func (r Runtime) captureHerdr(args []string) (string, error) {
 	binary, err := exec.LookPath("herdr")
 	if err != nil {
-		return errors.New("herdr executable not found on PATH")
+		return "", errors.New("herdr executable not found on PATH")
 	}
-	if env == nil {
-		env = r.Environ
-	}
+	var output cappedBuffer
+	output.limit = maxUpstreamDocumentationBytes
 	command := exec.Command(binary, args...)
-	command.Stdin, command.Stdout, command.Stderr, command.Env = r.Stdin, r.Stdout, r.Stderr, env
-	return command.Run()
+	command.Stdin, command.Stdout, command.Stderr, command.Env = r.Stdin, &output, r.Stderr, r.Environ
+	if err := command.Run(); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+type cappedBuffer struct {
+	buffer bytes.Buffer
+	limit  int
+}
+
+func (buffer *cappedBuffer) Write(data []byte) (int, error) {
+	if len(data) > buffer.limit-buffer.buffer.Len() {
+		return 0, fmt.Errorf("upstream documentation exceeds %d bytes", buffer.limit)
+	}
+	return buffer.buffer.Write(data)
+}
+
+func (buffer *cappedBuffer) String() string {
+	return buffer.buffer.String()
+}
+
+func quoteMarkdown(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	var quoted strings.Builder
+	for _, line := range strings.SplitAfter(value, "\n") {
+		if line == "" {
+			continue
+		}
+		quoted.WriteString("> ")
+		quoted.WriteString(line)
+		if !strings.HasSuffix(line, "\n") {
+			quoted.WriteByte('\n')
+		}
+	}
+	return quoted.String()
 }
 
 func (r Runtime) runInstall(args []string, socketPath string) error {

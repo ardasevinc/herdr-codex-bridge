@@ -99,8 +99,27 @@ Codex integration if setup found it installed.
   may be emitted after an exact live pane claim; concurrent hooks share an
   atomic at-most-once gate. Duplicate pane claims fail closed and warn once.
 
-`herdr-self --skill` prints the bridge overlay followed by Herdr's live upstream
-skill. `herdr-self --help` clearly delimits bridge help from upstream Herdr help.
+`herdr-self --skill` prints one authoritative bridge skill and includes Herdr's
+live upstream skill as quoted reference material. The bridge preflight replaces
+the upstream skill's bare `HERDR_ENV=1` precondition for centralized Codex
+sessions. `herdr-self --help` clearly delimits bridge help from upstream Herdr
+help and lists the exact read-only commands allowed while association is absent
+or ambiguous.
+
+`herdr-self --json` prints the current association as JSON, while
+`herdr-self doctor --json` prints structured diagnostics. `--json` is not a
+global flag for commands delegated to Herdr; those commands retain Herdr's own
+argument contract.
+
+### Known limitation
+
+A replacement TUI can attach to a thread that is already resident in the
+centralized app-server without receiving a new `SessionStart` marker. If the
+replacement pane never witnessed the older authenticated marker, version 0.1.x
+cannot safely infer that pane's thread and leaves it unmapped. Automatic
+recovery remains deferred until Herdr exposes authoritative pane-occupant
+identity suitable for an atomic report. Use Herdr's managed resume path when
+possible instead of inferring identity from pane ID, cwd, argv, or timing.
 
 ## Development
 
