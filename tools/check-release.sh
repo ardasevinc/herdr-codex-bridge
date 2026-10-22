@@ -7,7 +7,7 @@ grep -Fq 'binary: herdr-self' .goreleaser.yaml
 grep -Fq 'homebrew_casks:' .goreleaser.yaml
 grep -Fq 'name: herdr-codex-bridge' .goreleaser.yaml
 grep -Fq 'min_herdr_version = "0.8.2"' herdr-plugin.toml
-grep -Fq 'go 1.24.0' go.mod
+grep -Fq 'go 1.26.10' go.mod
 
 case "${GITHUB_REF_TYPE:-}" in
   tag)

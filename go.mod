@@ -1,3 +1,3 @@
 module github.com/ardasevinc/herdr-codex-bridge
 
-go 1.24.0
+go 1.26.10
